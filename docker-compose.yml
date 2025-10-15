@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  drm-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drm-mcp-server
+    environment:
+      # RECOMMENDED: Use API key authentication
+      - DRM_API_KEY=${DRM_API_KEY}
+      
+      # Alternative: Use username/password authentication
+      # Uncomment these and comment out DRM_API_KEY if using username/password
+      # - DRM_USERNAME=${DRM_USERNAME}
+      # - DRM_PASSWORD=${DRM_PASSWORD}
+      
+      # Node.js environment
+      - NODE_ENV=production
+    
+    # Since MCP uses stdio, we need to keep stdin open and allocate a tty
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional but recommended)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
