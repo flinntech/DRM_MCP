@@ -1,27 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Digi Remote Manager MCP Server - Multi-User Version
+ * Digi Remote Manager MCP Server - Simple Version
  * 
- * This version allows multiple users to connect with their own DRM API keys.
- * Users provide their API key when configuring the MCP server in Claude Desktop.
- * 
- * RECOMMENDED: Use API keys for better security
- * 
- * Setup for each user:
- * In Claude Desktop config, each user specifies their own API key:
- * 
- * {
- *   "mcpServers": {
- *     "digi-remote-manager": {
- *       "command": "node",
- *       "args": ["/path/to/drm-mcp-server.js"],
- *       "env": {
- *         "DRM_API_KEY": "their_api_key_here"
- *       }
- *     }
- *   }
- * }
+ * This version has the API key hardcoded for single-user testing.
+ * Just replace YOUR_API_KEY_HERE with your actual API key.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -34,69 +17,43 @@ import axios from "axios";
 
 const DRM_BASE_URL = "https://remotemanager.digi.com/ws";
 
+// ============================================
+// CONFIGURATION - Put your API key here
+// ============================================
+const API_KEY = "575bdbd10e82d6d47d5438c3e30bdacdf85880abaf948a65e68fe5325cb0352f";
+// ============================================
+
 class DigiRemoteManagerServer {
   constructor() {
-    // Each instance reads credentials from environment variables
-    // These are set per-user in their Claude Desktop configuration
-    // RECOMMENDED: Use API keys for better security and easier rotation
-    this.config = {
-      apiKey: process.env.DRM_API_KEY,
-      username: process.env.DRM_USERNAME,
-      password: process.env.DRM_PASSWORD,
-    };
-
-    // Validate that credentials are provided
-    if (!this.config.apiKey && (!this.config.username || !this.config.password)) {
+    // Validate that API key was set
+    if (!API_KEY || API_KEY === "YOUR_API_KEY_HERE") {
       console.error("╔════════════════════════════════════════════════════════════╗");
-      console.error("║  ERROR: DRM credentials not provided                      ║");
+      console.error("║  ERROR: API key not configured                            ║");
       console.error("╚════════════════════════════════════════════════════════════╝");
       console.error("");
-      console.error("Please set your Digi Remote Manager credentials:");
+      console.error("Please edit this file and replace YOUR_API_KEY_HERE with your");
+      console.error("actual Digi Remote Manager API key.");
       console.error("");
-      console.error("  RECOMMENDED: Use an API key");
-      console.error("    DRM_API_KEY=your_api_key_here");
-      console.error("");
-      console.error("  Alternative: Use username and password");
-      console.error("    DRM_USERNAME=your_username");
-      console.error("    DRM_PASSWORD=your_password");
-      console.error("");
-      console.error("Set these in your Claude Desktop configuration file.");
-      console.error("");
-      console.error("How to get an API key:");
+      console.error("How to get your API key:");
       console.error("  1. Log in to https://remotemanager.digi.com");
       console.error("  2. Click your profile → API Keys");
       console.error("  3. Create a new API key");
-      console.error("  4. Copy the key and use it in DRM_API_KEY");
+      console.error("  4. Copy the key and paste it in this file");
       console.error("");
       process.exit(1);
     }
 
-    // Configure axios client with user's authentication
-    const axiosConfig = {
+    // Configure axios client with the hardcoded API key
+    this.axiosClient = axios.create({
       baseURL: DRM_BASE_URL,
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "Authorization": `Bearer ${API_KEY}`,
       },
-    };
+    });
 
-    if (this.config.apiKey) {
-      axiosConfig.headers["Authorization"] = `Bearer ${this.config.apiKey}`;
-    } else if (this.config.username && this.config.password) {
-      axiosConfig.auth = {
-        username: this.config.username,
-        password: this.config.password,
-      };
-    }
-
-    this.axiosClient = axios.create(axiosConfig);
-
-    // Log successful initialization (without exposing credentials)
-    const authMethod = this.config.apiKey ? "API Key" : "Username/Password";
-    console.error(`DRM MCP Server initialized with ${authMethod} authentication`);
-    if (this.config.username) {
-      console.error(`Authenticated as: ${this.config.username}`);
-    }
+    console.error("✓ DRM MCP Server initialized with API Key authentication");
 
     this.server = new Server(
       {
@@ -442,13 +399,12 @@ class DigiRemoteManagerServer {
             throw new Error(`Unknown tool: ${name}`);
         }
       } catch (error) {
-        // Check for authentication errors
         if (error.response?.status === 401) {
           return {
             content: [
               {
                 type: "text",
-                text: "Authentication Error: Invalid credentials. Please check your DRM_API_KEY (or DRM_USERNAME and DRM_PASSWORD) in your Claude Desktop configuration.",
+                text: "Authentication Error: Invalid API key. Please check your API key in the code.",
               },
             ],
             isError: true,
