@@ -8,7 +8,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (production only)
-RUN npm ci --omit=dev
+# Note: Using npm install instead of npm ci because package-lock.json might not be in repo
+RUN npm install --production
 
 # Copy application files
 COPY drm-mcp-server.js ./
