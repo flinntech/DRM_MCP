@@ -1,0 +1,35 @@
+{
+  "name": "digi-remote-manager-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Digi Remote Manager API integration",
+  "type": "module",
+  "main": "drm-mcp-server.js",
+  "bin": {
+    "drm-mcp-server": "./drm-mcp-server.js"
+  },
+  "scripts": {
+    "start": "node drm-mcp-server.js",
+    "build": "tsc",
+    "dev": "tsc && node drm-mcp-server.js"
+  },
+  "keywords": [
+    "mcp",
+    "digi",
+    "remote-manager",
+    "iot",
+    "device-management"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
