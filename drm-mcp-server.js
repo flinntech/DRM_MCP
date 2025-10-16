@@ -25,8 +25,8 @@ const DRM_BASE_URL = "https://remotemanager.digi.com/ws";
 class DigiRemoteManagerServer {
   constructor() {
     // Use environment variables for security
-    const API_KEY_ID = process.env.DRM_API_KEY_ID;
-    const API_KEY_SECRET = process.env.DRM_API_KEY_SECRET;
+    const API_KEY_ID = "21ceb74482394018f7c99aeac9b8a8a8";
+    const API_KEY_SECRET = "c815fb75829ac2417997180c43e2f5d17501cbb3cc25aafb1c16067683f3438b";
     
     if (!API_KEY_ID || !API_KEY_SECRET) {
       console.error("╔════════════════════════════════════════════════════════════╗");
