@@ -20,8 +20,8 @@ const DRM_BASE_URL = "https://remotemanager.digi.com/ws";
 // ============================================
 // CONFIGURATION - Put your API key here
 // ============================================
-const API_KEY_ID = "21ceb74482394018f7c99aeac9b8a8a8";
-const API_KEY_SECRET = "c815fb75829ac2417997180c43e2f5d17501cbb3cc25aafb1c16067683f3438b";
+const API_KEY_ID = "52ea20b6ea68ed00a5ceeb447cd13ba4";
+const API_KEY_SECRET = "3ef3cfa5df287fd884dfe1668c48484f39e2d92905d255bc38642fe07e352efd";
 // ============================================
 
 class DigiRemoteManagerServer {
