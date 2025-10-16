@@ -2,8 +2,7 @@
 
 /**
  * Digi Remote Manager MCP Server - Enhanced Version
- * 
- * Comprehensive coverage of DRM v1 API with all read operations
+ * Fixed for n8n compatibility
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -27,7 +26,6 @@ const API_KEY_SECRET = "c815fb75829ac2417997180c43e2f5d17501cbb3cc25aafb1c160676
 
 class DigiRemoteManagerServer {
   constructor() {
-    // Validate that API key was set
     if (!API_KEY_ID || !API_KEY_SECRET || API_KEY_ID === "YOUR_API_KEY_ID_HERE" || API_KEY_SECRET === "YOUR_API_KEY_HERE") {
       console.error("╔════════════════════════════════════════════════════════════╗");
       console.error("║  ERROR: API key not configured                            ║");
@@ -38,7 +36,6 @@ class DigiRemoteManagerServer {
       process.exit(1);
     }
 
-    // Configure axios client with the hardcoded API key
     this.axiosClient = axios.create({
       baseURL: DRM_BASE_URL,
       headers: {
@@ -67,978 +64,647 @@ class DigiRemoteManagerServer {
   }
 
   setupHandlers() {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        // ==================== DEVICE APIS ====================
-        {
-          name: "list_devices",
-          description: "List all devices in your Remote Manager account. Supports advanced query filtering: 'connection_status = \"connected\"', 'signal_percent < 50', 'group startsWith \"/Production\"', 'tags = \"critical\" and health_status = \"error\"'",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter devices (e.g., 'connection_status = \"connected\"')",
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      return {
+        tools: [
+          // ==================== DEVICE APIS ====================
+          {
+            name: "list_devices",
+            description: "List all devices. Query examples: 'connection_status=\"connected\"', 'signal_percent<50', 'group startsWith \"/Production\"', 'tags=\"critical\" and health_status=\"error\"'",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                size: { type: "number", description: "Results to return" },
+                cursor: { type: "string", description: "Pagination cursor" },
+                orderby: { type: "string", description: "Sort field and order" },
               },
-              size: {
-                type: "number",
-                description: "Number of results to return (default: 1000)",
-              },
-              cursor: {
-                type: "string",
-                description: "Cursor for pagination",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by with optional 'asc' or 'desc' (e.g., 'name desc', 'last_connect asc')",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "list_devices_bulk",
-          description: "Get devices in CSV format for large exports and data analysis",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter devices",
+          {
+            name: "list_devices_bulk",
+            description: "Export devices to CSV format",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                fields: { type: "string", description: "Comma-separated fields" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              fields: {
-                type: "string",
-                description: "Comma-separated list of fields to include in CSV",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_device",
-          description: "Get detailed information about a specific device by ID",
-          inputSchema: {
-            type: "object",
-            properties: {
-              device_id: {
-                type: "string",
-                description: "The device ID (UUID format)",
+          {
+            name: "get_device",
+            description: "Get device details by ID",
+            inputSchema: {
+              type: "object",
+              properties: {
+                device_id: { type: "string", description: "Device ID" },
               },
+              required: ["device_id"],
             },
-            required: ["device_id"],
           },
-        },
-        {
-          name: "get_device_data_streams",
-          description: "Get data streams (channel data) from a device. Can retrieve all streams or a specific stream with history",
-          inputSchema: {
-            type: "object",
-            properties: {
-              device_id: {
-                type: "string",
-                description: "The device ID",
+          {
+            name: "get_device_data_streams",
+            description: "Get device data streams with history",
+            inputSchema: {
+              type: "object",
+              properties: {
+                device_id: { type: "string", description: "Device ID" },
+                stream_id: { type: "string", description: "Optional stream ID" },
+                start_time: { type: "string", description: "Start time (ISO or relative like '-1d')" },
+                end_time: { type: "string", description: "End time" },
+                size: { type: "number", description: "Number of points" },
+                cursor: { type: "string", description: "Pagination cursor" },
               },
-              stream_id: {
-                type: "string",
-                description: "Optional stream ID to get specific stream",
-              },
-              start_time: {
-                type: "string",
-                description: "Start time for data (ISO 8601 or relative like '-1d', '-2h')",
-              },
-              end_time: {
-                type: "string",
-                description: "End time for data (ISO 8601)",
-              },
-              size: {
-                type: "number",
-                description: "Number of data points to return",
-              },
-              cursor: {
-                type: "string",
-                description: "Cursor for pagination",
-              },
+              required: ["device_id"],
             },
-            required: ["device_id"],
           },
-        },
-        {
-          name: "get_device_logs",
-          description: "Get device logs for troubleshooting",
-          inputSchema: {
-            type: "object",
-            properties: {
-              device_id: {
-                type: "string",
-                description: "The device ID",
+          {
+            name: "get_device_logs",
+            description: "Get device logs for troubleshooting",
+            inputSchema: {
+              type: "object",
+              properties: {
+                device_id: { type: "string", description: "Device ID" },
+                start_time: { type: "string", description: "Start time" },
+                size: { type: "number", description: "Number of entries" },
               },
-              start_time: {
-                type: "string",
-                description: "Start time for logs (ISO 8601 or relative like '-1d')",
-              },
-              size: {
-                type: "number",
-                description: "Number of log entries to return",
-              },
+              required: ["device_id"],
             },
-            required: ["device_id"],
           },
-        },
 
-        // ==================== GROUP APIS ====================
-        {
-          name: "list_groups",
-          description: "List all device groups in your account",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter groups",
+          // ==================== GROUP APIS ====================
+          {
+            name: "list_groups",
+            description: "List device groups",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_group",
-          description: "Get detailed information about a specific group",
-          inputSchema: {
-            type: "object",
-            properties: {
-              group_id: {
-                type: "string",
-                description: "The group ID",
+          {
+            name: "get_group",
+            description: "Get group details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                group_id: { type: "string", description: "Group ID" },
               },
+              required: ["group_id"],
             },
-            required: ["group_id"],
           },
-        },
 
-        // ==================== ALERT APIS ====================
-        {
-          name: "list_alerts",
-          description: "List configured alerts in your account",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter alerts",
+          // ==================== ALERT APIS ====================
+          {
+            name: "list_alerts",
+            description: "List alerts",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                size: { type: "number", description: "Results to return" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              size: {
-                type: "number",
-                description: "Number of results to return",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_alert",
-          description: "Get detailed information about a specific alert",
-          inputSchema: {
-            type: "object",
-            properties: {
-              alert_id: {
-                type: "string",
-                description: "The alert ID",
+          {
+            name: "get_alert",
+            description: "Get alert details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                alert_id: { type: "string", description: "Alert ID" },
               },
+              required: ["alert_id"],
             },
-            required: ["alert_id"],
           },
-        },
 
-        // ==================== MONITOR APIS ====================
-        {
-          name: "list_monitors",
-          description: "List configured monitors (webhooks) in your account",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter monitors",
+          // ==================== MONITOR APIS ====================
+          {
+            name: "list_monitors",
+            description: "List monitors (webhooks)",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_monitor",
-          description: "Get detailed information about a specific monitor",
-          inputSchema: {
-            type: "object",
-            properties: {
-              monitor_id: {
-                type: "string",
-                description: "The monitor ID",
+          {
+            name: "get_monitor",
+            description: "Get monitor details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                monitor_id: { type: "string", description: "Monitor ID" },
               },
+              required: ["monitor_id"],
             },
-            required: ["monitor_id"],
           },
-        },
-        {
-          name: "get_monitor_history",
-          description: "Get historical polling data for a monitor",
-          inputSchema: {
-            type: "object",
-            properties: {
-              monitor_id: {
-                type: "string",
-                description: "The monitor ID",
+          {
+            name: "get_monitor_history",
+            description: "Get monitor polling history",
+            inputSchema: {
+              type: "object",
+              properties: {
+                monitor_id: { type: "string", description: "Monitor ID" },
+                start_time: { type: "string", description: "Start time" },
+                end_time: { type: "string", description: "End time" },
+                size: { type: "number", description: "Number of entries" },
               },
-              start_time: {
-                type: "string",
-                description: "Start time (ISO 8601 or relative)",
-              },
-              end_time: {
-                type: "string",
-                description: "End time (ISO 8601)",
-              },
-              size: {
-                type: "number",
-                description: "Number of history entries",
-              },
+              required: ["monitor_id"],
             },
-            required: ["monitor_id"],
           },
-        },
 
-        // ==================== AUTOMATION APIS ====================
-        {
-          name: "list_automations",
-          description: "List configured automations (scheduled tasks/scripts) in your account",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter automations",
+          // ==================== AUTOMATION APIS ====================
+          {
+            name: "list_automations",
+            description: "List automations",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_automation",
-          description: "Get detailed information about a specific automation",
-          inputSchema: {
-            type: "object",
-            properties: {
-              automation_id: {
-                type: "string",
-                description: "The automation ID",
+          {
+            name: "get_automation",
+            description: "Get automation details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                automation_id: { type: "string", description: "Automation ID" },
               },
-            },
-            required: ["automation_id"],
-          },
-        },
-        {
-          name: "list_automation_runs",
-          description: "List execution history for automations",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter runs (e.g., 'automation_id = \"123\"')",
-              },
-              size: {
-                type: "number",
-                description: "Number of results",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by (default: 'id desc' for most recent first)",
-              },
+              required: ["automation_id"],
             },
           },
-        },
-        {
-          name: "get_automation_run",
-          description: "Get details of a specific automation run including results",
-          inputSchema: {
-            type: "object",
-            properties: {
-              run_id: {
-                type: "string",
-                description: "The automation run ID",
+          {
+            name: "list_automation_runs",
+            description: "List automation execution history",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                size: { type: "number", description: "Results to return" },
+                orderby: { type: "string", description: "Sort field (default: 'id desc')" },
               },
-            },
-            required: ["run_id"],
-          },
-        },
-        {
-          name: "list_automation_schedules",
-          description: "List scheduled automation executions",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter schedules",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_automation_schedule",
-          description: "Get details of a specific automation schedule",
-          inputSchema: {
-            type: "object",
-            properties: {
-              schedule_id: {
-                type: "string",
-                description: "The schedule ID",
+          {
+            name: "get_automation_run",
+            description: "Get automation run details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                run_id: { type: "string", description: "Run ID" },
               },
+              required: ["run_id"],
             },
-            required: ["schedule_id"],
           },
-        },
+          {
+            name: "list_automation_schedules",
+            description: "List automation schedules",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
+              },
+              required: [],
+            },
+          },
+          {
+            name: "get_automation_schedule",
+            description: "Get schedule details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                schedule_id: { type: "string", description: "Schedule ID" },
+              },
+              required: ["schedule_id"],
+            },
+          },
 
-        // ==================== JOB APIS ====================
-        {
-          name: "list_jobs",
-          description: "List all jobs (long-running operations like firmware updates, config deployments). Jobs track operation status and progress.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter jobs (e.g., 'job_type = \"firmware_update\"', 'status = \"running\"')",
+          // ==================== JOB APIS ====================
+          {
+            name: "list_jobs",
+            description: "List jobs (firmware updates, configs, etc.)",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                size: { type: "number", description: "Results to return" },
+                cursor: { type: "string", description: "Pagination cursor" },
+                orderby: { type: "string", description: "Sort field (default: 'id desc')" },
               },
-              size: {
-                type: "number",
-                description: "Number of results to return",
-              },
-              cursor: {
-                type: "string",
-                description: "Cursor for pagination",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by (default: 'id desc' for most recent first)",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "list_jobs_bulk",
-          description: "Get jobs in CSV format for analysis",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter jobs",
+          {
+            name: "list_jobs_bulk",
+            description: "Export jobs to CSV",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                fields: { type: "string", description: "Comma-separated fields" },
               },
-              fields: {
-                type: "string",
-                description: "Comma-separated list of fields",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_job",
-          description: "Get detailed information about a specific job",
-          inputSchema: {
-            type: "object",
-            properties: {
-              job_id: {
-                type: "string",
-                description: "The job ID",
+          {
+            name: "get_job",
+            description: "Get job details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                job_id: { type: "string", description: "Job ID" },
               },
+              required: ["job_id"],
             },
-            required: ["job_id"],
           },
-        },
 
-        // ==================== FIRMWARE APIS ====================
-        {
-          name: "list_firmware",
-          description: "List available firmware versions",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter firmware",
+          // ==================== FIRMWARE APIS ====================
+          {
+            name: "list_firmware",
+            description: "List firmware versions",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_firmware",
-          description: "Get detailed information about a specific firmware version",
-          inputSchema: {
-            type: "object",
-            properties: {
-              firmware_id: {
-                type: "string",
-                description: "The firmware ID",
+          {
+            name: "get_firmware",
+            description: "Get firmware details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                firmware_id: { type: "string", description: "Firmware ID" },
               },
-            },
-            required: ["firmware_id"],
-          },
-        },
-        {
-          name: "list_firmware_updates",
-          description: "List firmware update operations and their status",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter firmware updates",
-              },
-              size: {
-                type: "number",
-                description: "Number of results",
-              },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: ["firmware_id"],
             },
           },
-        },
-        {
-          name: "get_firmware_update",
-          description: "Get progress and status of a specific firmware update",
-          inputSchema: {
-            type: "object",
-            properties: {
-              update_id: {
-                type: "string",
-                description: "The firmware update ID",
+          {
+            name: "list_firmware_updates",
+            description: "List firmware update operations",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                size: { type: "number", description: "Results to return" },
+                orderby: { type: "string", description: "Sort field" },
               },
+              required: [],
             },
-            required: ["update_id"],
           },
-        },
+          {
+            name: "get_firmware_update",
+            description: "Get firmware update status",
+            inputSchema: {
+              type: "object",
+              properties: {
+                update_id: { type: "string", description: "Update ID" },
+              },
+              required: ["update_id"],
+            },
+          },
 
-        // ==================== REPORTS APIS ====================
-        {
-          name: "list_reports",
-          description: "Get list of all available report types in Remote Manager",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "get_connection_report",
-          description: "Get summary of current device connection status",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter devices in report",
-              },
-              group: {
-                type: "string",
-                description: "Limit report to specific group",
-              },
+          // ==================== REPORTS APIS ====================
+          {
+            name: "list_reports",
+            description: "List available report types",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
             },
           },
-        },
-        {
-          name: "get_alert_report",
-          description: "Get summary of fired alerts",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter alerts",
+          {
+            name: "get_connection_report",
+            description: "Get connection status summary",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                group: { type: "string", description: "Limit to group" },
               },
-              start_time: {
-                type: "string",
-                description: "Start time for report",
-              },
-              end_time: {
-                type: "string",
-                description: "End time for report",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_device_report",
-          description: "Get device summary report by various dimensions (health, firmware, signal strength, carrier, etc.)",
-          inputSchema: {
-            type: "object",
-            properties: {
-              report_type: {
-                type: "string",
-                description: "Report type: 'health_status', 'firmware_version', 'connection_status', 'carrier', 'signal_percent', 'type', 'vendor_id', 'restricted_status', 'compliance', 'tags', etc.",
+          {
+            name: "get_alert_report",
+            description: "Get alert summary",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                start_time: { type: "string", description: "Start time" },
+                end_time: { type: "string", description: "End time" },
               },
-              query: {
-                type: "string",
-                description: "Query to filter devices",
-              },
-              group: {
-                type: "string",
-                description: "Limit to specific group",
-              },
-              scope: {
-                type: "string",
-                description: "For cellular reports: 'primary' or 'secondary'",
-              },
-            },
-            required: ["report_type"],
-          },
-        },
-        {
-          name: "get_cellular_utilization_report",
-          description: "Get cellular data usage statistics",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_time: {
-                type: "string",
-                description: "Start time for report",
-              },
-              end_time: {
-                type: "string",
-                description: "End time for report",
-              },
-              query: {
-                type: "string",
-                description: "Query to filter devices",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_device_availability_report",
-          description: "Get device uptime and availability statistics",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_time: {
-                type: "string",
-                description: "Start time for report",
+          {
+            name: "get_device_report",
+            description: "Get device summary by dimension (health_status, firmware_version, connection_status, carrier, signal_percent, type, vendor_id, restricted_status, compliance, tags)",
+            inputSchema: {
+              type: "object",
+              properties: {
+                report_type: { type: "string", description: "Report dimension" },
+                query: { type: "string", description: "Query filter" },
+                group: { type: "string", description: "Limit to group" },
+                scope: { type: "string", description: "For cellular: 'primary' or 'secondary'" },
               },
-              end_time: {
-                type: "string",
-                description: "End time for report",
-              },
-              query: {
-                type: "string",
-                description: "Query to filter devices",
-              },
+              required: ["report_type"],
             },
           },
-        },
+          {
+            name: "get_cellular_utilization_report",
+            description: "Get cellular data usage",
+            inputSchema: {
+              type: "object",
+              properties: {
+                start_time: { type: "string", description: "Start time" },
+                end_time: { type: "string", description: "End time" },
+                query: { type: "string", description: "Query filter" },
+              },
+              required: [],
+            },
+          },
+          {
+            name: "get_device_availability_report",
+            description: "Get device uptime statistics",
+            inputSchema: {
+              type: "object",
+              properties: {
+                start_time: { type: "string", description: "Start time" },
+                end_time: { type: "string", description: "End time" },
+                query: { type: "string", description: "Query filter" },
+              },
+              required: [],
+            },
+          },
 
-        // ==================== CONFIG APIS ====================
-        {
-          name: "list_configs",
-          description: "List configuration templates for device management",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter configs",
+          // ==================== CONFIG APIS ====================
+          {
+            name: "list_configs",
+            description: "List configuration templates",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_config",
-          description: "Get detailed information about a specific configuration",
-          inputSchema: {
-            type: "object",
-            properties: {
-              config_id: {
-                type: "string",
-                description: "The configuration ID",
+          {
+            name: "get_config",
+            description: "Get config details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                config_id: { type: "string", description: "Config ID" },
               },
+              required: ["config_id"],
             },
-            required: ["config_id"],
           },
-        },
 
-        // ==================== HEALTH CONFIG APIS ====================
-        {
-          name: "list_health_configs",
-          description: "List health monitoring configurations",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter health configs",
+          // ==================== HEALTH CONFIG APIS ====================
+          {
+            name: "list_health_configs",
+            description: "List health monitoring configs",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_health_config",
-          description: "Get detailed information about a specific health configuration",
-          inputSchema: {
-            type: "object",
-            properties: {
-              health_config_id: {
-                type: "string",
-                description: "The health configuration ID",
+          {
+            name: "get_health_config",
+            description: "Get health config details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                health_config_id: { type: "string", description: "Health config ID" },
               },
+              required: ["health_config_id"],
             },
-            required: ["health_config_id"],
           },
-        },
 
-        // ==================== EVENT APIS ====================
-        {
-          name: "list_events",
-          description: "List events from your account event log (audit trail)",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter events",
+          // ==================== EVENT APIS ====================
+          {
+            name: "list_events",
+            description: "List event log (audit trail)",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                start_time: { type: "string", description: "Start time" },
+                end_time: { type: "string", description: "End time" },
+                size: { type: "number", description: "Results to return" },
               },
-              start_time: {
-                type: "string",
-                description: "Start time for events (ISO 8601 or relative like '-1d')",
-              },
-              end_time: {
-                type: "string",
-                description: "End time for events",
-              },
-              size: {
-                type: "number",
-                description: "Number of events to return",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "list_events_bulk",
-          description: "Get events in CSV format for analysis",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter events",
+          {
+            name: "list_events_bulk",
+            description: "Export events to CSV",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                start_time: { type: "string", description: "Start time" },
+                end_time: { type: "string", description: "End time" },
+                fields: { type: "string", description: "Comma-separated fields" },
               },
-              start_time: {
-                type: "string",
-                description: "Start time for events",
-              },
-              end_time: {
-                type: "string",
-                description: "End time for events",
-              },
-              fields: {
-                type: "string",
-                description: "Comma-separated list of fields",
-              },
+              required: [],
             },
           },
-        },
 
-        // ==================== USER APIS ====================
-        {
-          name: "list_users",
-          description: "List users in your Remote Manager account",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query string to filter users",
+          // ==================== USER APIS ====================
+          {
+            name: "list_users",
+            description: "List users",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_user",
-          description: "Get detailed information about a specific user",
-          inputSchema: {
-            type: "object",
-            properties: {
-              user_id: {
-                type: "string",
-                description: "The user ID",
+          {
+            name: "get_user",
+            description: "Get user details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                user_id: { type: "string", description: "User ID" },
               },
+              required: ["user_id"],
             },
-            required: ["user_id"],
           },
-        },
 
-        // ==================== API KEY APIS ====================
-        {
-          name: "list_api_keys",
-          description: "List API keys for authentication",
-          inputSchema: {
-            type: "object",
-            properties: {
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
+          // ==================== API KEY APIS ====================
+          {
+            name: "list_api_keys",
+            description: "List API keys",
+            inputSchema: {
+              type: "object",
+              properties: {
+                orderby: { type: "string", description: "Sort field" },
               },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_api_key",
-          description: "Get details of a specific API key",
-          inputSchema: {
-            type: "object",
-            properties: {
-              api_key_id: {
-                type: "string",
-                description: "The API key ID",
+          {
+            name: "get_api_key",
+            description: "Get API key details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                api_key_id: { type: "string", description: "API key ID" },
               },
+              required: ["api_key_id"],
             },
-            required: ["api_key_id"],
           },
-        },
 
-        // ==================== FILE APIS ====================
-        {
-          name: "list_files",
-          description: "List files stored in Remote Manager",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Query to filter files",
+          // ==================== FILE APIS ====================
+          {
+            name: "list_files",
+            description: "List files",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Query filter" },
+                orderby: { type: "string", description: "Sort field" },
               },
-              orderby: {
-                type: "string",
-                description: "Field to sort by",
-              },
+              required: [],
             },
           },
-        },
-        {
-          name: "get_file",
-          description: "Get details about a specific file",
-          inputSchema: {
-            type: "object",
-            properties: {
-              file_id: {
-                type: "string",
-                description: "The file ID",
+          {
+            name: "get_file",
+            description: "Get file details",
+            inputSchema: {
+              type: "object",
+              properties: {
+                file_id: { type: "string", description: "File ID" },
               },
+              required: ["file_id"],
             },
-            required: ["file_id"],
           },
-        },
 
-        // ==================== ACCOUNT APIS ====================
-        {
-          name: "get_account_info",
-          description: "Get information about your Remote Manager account",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "get_account_security",
-          description: "Get account security settings including password policies",
-          inputSchema: {
-            type: "object",
-            properties: {
-              system_defaults: {
-                type: "boolean",
-                description: "Get system default settings instead of account settings",
-              },
+          // ==================== ACCOUNT APIS ====================
+          {
+            name: "get_account_info",
+            description: "Get account information",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: [],
             },
           },
-        },
+          {
+            name: "get_account_security",
+            description: "Get account security settings",
+            inputSchema: {
+              type: "object",
+              properties: {
+                system_defaults: { type: "boolean", description: "Get system defaults" },
+              },
+              required: [],
+            },
+          },
 
-        // ==================== UTILITY APIS ====================
-        {
-          name: "get_api_info",
-          description: "Get self-documented API information for any v1 endpoint. Useful for discovering available APIs and their capabilities.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              endpoint: {
-                type: "string",
-                description: "API endpoint name like 'devices', 'alerts', 'jobs', 'reports', etc. Leave empty for top-level v1 API list.",
+          // ==================== UTILITY APIS ====================
+          {
+            name: "get_api_info",
+            description: "Get self-documented API info for endpoint discovery",
+            inputSchema: {
+              type: "object",
+              properties: {
+                endpoint: { type: "string", description: "Endpoint name (devices, alerts, jobs, etc.) or empty for top-level" },
               },
+              required: [],
             },
           },
-        },
-      ],
-    }));
+        ],
+      };
+    });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
         const { name, arguments: args } = request.params;
 
         switch (name) {
-          // Device APIs
-          case "list_devices":
-            return await this.listDevices(args);
-          case "list_devices_bulk":
-            return await this.listDevicesBulk(args);
-          case "get_device":
-            return await this.getDevice(args);
-          case "get_device_data_streams":
-            return await this.getDeviceDataStreams(args);
-          case "get_device_logs":
-            return await this.getDeviceLogs(args);
-
-          // Group APIs
-          case "list_groups":
-            return await this.listGroups(args);
-          case "get_group":
-            return await this.getGroup(args);
-
-          // Alert APIs
-          case "list_alerts":
-            return await this.listAlerts(args);
-          case "get_alert":
-            return await this.getAlert(args);
-
-          // Monitor APIs
-          case "list_monitors":
-            return await this.listMonitors(args);
-          case "get_monitor":
-            return await this.getMonitor(args);
-          case "get_monitor_history":
-            return await this.getMonitorHistory(args);
-
-          // Automation APIs
-          case "list_automations":
-            return await this.listAutomations(args);
-          case "get_automation":
-            return await this.getAutomation(args);
-          case "list_automation_runs":
-            return await this.listAutomationRuns(args);
-          case "get_automation_run":
-            return await this.getAutomationRun(args);
-          case "list_automation_schedules":
-            return await this.listAutomationSchedules(args);
-          case "get_automation_schedule":
-            return await this.getAutomationSchedule(args);
-
-          // Job APIs
-          case "list_jobs":
-            return await this.listJobs(args);
-          case "list_jobs_bulk":
-            return await this.listJobsBulk(args);
-          case "get_job":
-            return await this.getJob(args);
-
-          // Firmware APIs
-          case "list_firmware":
-            return await this.listFirmware(args);
-          case "get_firmware":
-            return await this.getFirmware(args);
-          case "list_firmware_updates":
-            return await this.listFirmwareUpdates(args);
-          case "get_firmware_update":
-            return await this.getFirmwareUpdate(args);
-
-          // Report APIs
-          case "list_reports":
-            return await this.listReports(args);
-          case "get_connection_report":
-            return await this.getConnectionReport(args);
-          case "get_alert_report":
-            return await this.getAlertReport(args);
-          case "get_device_report":
-            return await this.getDeviceReport(args);
-          case "get_cellular_utilization_report":
-            return await this.getCellularUtilizationReport(args);
-          case "get_device_availability_report":
-            return await this.getDeviceAvailabilityReport(args);
-
-          // Config APIs
-          case "list_configs":
-            return await this.listConfigs(args);
-          case "get_config":
-            return await this.getConfig(args);
-
-          // Health Config APIs
-          case "list_health_configs":
-            return await this.listHealthConfigs(args);
-          case "get_health_config":
-            return await this.getHealthConfig(args);
-
-          // Event APIs
-          case "list_events":
-            return await this.listEvents(args);
-          case "list_events_bulk":
-            return await this.listEventsBulk(args);
-
-          // User APIs
-          case "list_users":
-            return await this.listUsers(args);
-          case "get_user":
-            return await this.getUser(args);
-
-          // API Key APIs
-          case "list_api_keys":
-            return await this.listApiKeys(args);
-          case "get_api_key":
-            return await this.getApiKey(args);
-
-          // File APIs
-          case "list_files":
-            return await this.listFiles(args);
-          case "get_file":
-            return await this.getFile(args);
-
-          // Account APIs
-          case "get_account_info":
-            return await this.getAccountInfo(args);
-          case "get_account_security":
-            return await this.getAccountSecurity(args);
-
-          // Utility APIs
-          case "get_api_info":
-            return await this.getApiInfo(args);
-
+          case "list_devices": return await this.listDevices(args);
+          case "list_devices_bulk": return await this.listDevicesBulk(args);
+          case "get_device": return await this.getDevice(args);
+          case "get_device_data_streams": return await this.getDeviceDataStreams(args);
+          case "get_device_logs": return await this.getDeviceLogs(args);
+          case "list_groups": return await this.listGroups(args);
+          case "get_group": return await this.getGroup(args);
+          case "list_alerts": return await this.listAlerts(args);
+          case "get_alert": return await this.getAlert(args);
+          case "list_monitors": return await this.listMonitors(args);
+          case "get_monitor": return await this.getMonitor(args);
+          case "get_monitor_history": return await this.getMonitorHistory(args);
+          case "list_automations": return await this.listAutomations(args);
+          case "get_automation": return await this.getAutomation(args);
+          case "list_automation_runs": return await this.listAutomationRuns(args);
+          case "get_automation_run": return await this.getAutomationRun(args);
+          case "list_automation_schedules": return await this.listAutomationSchedules(args);
+          case "get_automation_schedule": return await this.getAutomationSchedule(args);
+          case "list_jobs": return await this.listJobs(args);
+          case "list_jobs_bulk": return await this.listJobsBulk(args);
+          case "get_job": return await this.getJob(args);
+          case "list_firmware": return await this.listFirmware(args);
+          case "get_firmware": return await this.getFirmware(args);
+          case "list_firmware_updates": return await this.listFirmwareUpdates(args);
+          case "get_firmware_update": return await this.getFirmwareUpdate(args);
+          case "list_reports": return await this.listReports(args);
+          case "get_connection_report": return await this.getConnectionReport(args);
+          case "get_alert_report": return await this.getAlertReport(args);
+          case "get_device_report": return await this.getDeviceReport(args);
+          case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
+          case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
+          case "list_configs": return await this.listConfigs(args);
+          case "get_config": return await this.getConfig(args);
+          case "list_health_configs": return await this.listHealthConfigs(args);
+          case "get_health_config": return await this.getHealthConfig(args);
+          case "list_events": return await this.listEvents(args);
+          case "list_events_bulk": return await this.listEventsBulk(args);
+          case "list_users": return await this.listUsers(args);
+          case "get_user": return await this.getUser(args);
+          case "list_api_keys": return await this.listApiKeys(args);
+          case "get_api_key": return await this.getApiKey(args);
+          case "list_files": return await this.listFiles(args);
+          case "get_file": return await this.getFile(args);
+          case "get_account_info": return await this.getAccountInfo(args);
+          case "get_account_security": return await this.getAccountSecurity(args);
+          case "get_api_info": return await this.getApiInfo(args);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -1048,78 +714,44 @@ class DigiRemoteManagerServer {
     });
   }
 
-  // ==================== ERROR HANDLER ====================
   handleError(error) {
     if (error.response?.status === 401) {
       return {
-        content: [
-          {
-            type: "text",
-            text: "Authentication Error: Invalid API key. Please check your API key configuration.",
-          },
-        ],
+        content: [{ type: "text", text: "Authentication Error: Invalid API key." }],
         isError: true,
       };
     }
-
     if (error.response?.status === 403) {
       return {
-        content: [
-          {
-            type: "text",
-            text: "Permission Denied: This feature may require Remote Manager Premier Edition or additional permissions. Contact Digi support to upgrade your subscription.",
-          },
-        ],
+        content: [{ type: "text", text: "Permission Denied: May require Remote Manager Premier Edition." }],
         isError: true,
       };
     }
-
     if (error.response?.status === 404) {
       return {
-        content: [
-          {
-            type: "text",
-            text: "Not Found: The requested resource does not exist.",
-          },
-        ],
+        content: [{ type: "text", text: "Not Found: Resource does not exist." }],
         isError: true,
       };
     }
-
     return {
-      content: [
-        {
-          type: "text",
-          text: `Error: ${error.message}\n${error.response?.data ? JSON.stringify(error.response.data, null, 2) : ""}`,
-        },
-      ],
+      content: [{ type: "text", text: `Error: ${error.message}\n${error.response?.data ? JSON.stringify(error.response.data, null, 2) : ""}` }],
       isError: true,
     };
   }
 
-  // ==================== HELPER FUNCTIONS ====================
   buildParams(args, allowedParams = []) {
     const params = {};
     for (const param of allowedParams) {
-      if (args[param] !== undefined) {
-        params[param] = args[param];
-      }
+      if (args[param] !== undefined) params[param] = args[param];
     }
     return params;
   }
 
   formatResponse(data) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(data, null, 2),
-        },
-      ],
-    };
+    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 
-  // ==================== DEVICE IMPLEMENTATIONS ====================
+  // ==================== IMPLEMENTATIONS ====================
   async listDevices(args) {
     const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
     const response = await this.axiosClient.get("/v1/devices/inventory", { params });
@@ -1129,14 +761,7 @@ class DigiRemoteManagerServer {
   async listDevicesBulk(args) {
     const params = this.buildParams(args, ["query", "fields", "orderby"]);
     const response = await this.axiosClient.get("/v1/devices/bulk", { params });
-    return {
-      content: [
-        {
-          type: "text",
-          text: response.data,
-        },
-      ],
-    };
+    return { content: [{ type: "text", text: response.data }] };
   }
 
   async getDevice(args) {
@@ -1146,10 +771,7 @@ class DigiRemoteManagerServer {
 
   async getDeviceDataStreams(args) {
     let url = `/v1/streams/${args.device_id}`;
-    if (args.stream_id) {
-      url += `/${args.stream_id}`;
-    }
-
+    if (args.stream_id) url += `/${args.stream_id}`;
     const params = this.buildParams(args, ["start_time", "end_time", "size", "cursor"]);
     const response = await this.axiosClient.get(url, { params });
     return this.formatResponse(response.data);
@@ -1161,7 +783,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== GROUP IMPLEMENTATIONS ====================
   async listGroups(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/groups/inventory", { params });
@@ -1173,7 +794,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== ALERT IMPLEMENTATIONS ====================
   async listAlerts(args) {
     const params = this.buildParams(args, ["query", "size", "orderby"]);
     const response = await this.axiosClient.get("/v1/alerts/inventory", { params });
@@ -1185,7 +805,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== MONITOR IMPLEMENTATIONS ====================
   async listMonitors(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/monitors/inventory", { params });
@@ -1203,7 +822,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== AUTOMATION IMPLEMENTATIONS ====================
   async listAutomations(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/automations/inventory", { params });
@@ -1237,7 +855,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== JOB IMPLEMENTATIONS ====================
   async listJobs(args) {
     const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
     const response = await this.axiosClient.get("/v1/jobs/inventory", { params });
@@ -1247,14 +864,7 @@ class DigiRemoteManagerServer {
   async listJobsBulk(args) {
     const params = this.buildParams(args, ["query", "fields"]);
     const response = await this.axiosClient.get("/v1/jobs/bulk", { params });
-    return {
-      content: [
-        {
-          type: "text",
-          text: response.data,
-        },
-      ],
-    };
+    return { content: [{ type: "text", text: response.data }] };
   }
 
   async getJob(args) {
@@ -1262,7 +872,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== FIRMWARE IMPLEMENTATIONS ====================
   async listFirmware(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/firmware/inventory", { params });
@@ -1285,7 +894,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== REPORT IMPLEMENTATIONS ====================
   async listReports() {
     const response = await this.axiosClient.get("/v1/reports");
     return this.formatResponse(response.data);
@@ -1321,7 +929,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== CONFIG IMPLEMENTATIONS ====================
   async listConfigs(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/configs/inventory", { params });
@@ -1333,7 +940,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== HEALTH CONFIG IMPLEMENTATIONS ====================
   async listHealthConfigs(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/health_configs/inventory", { params });
@@ -1345,7 +951,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== EVENT IMPLEMENTATIONS ====================
   async listEvents(args) {
     const params = this.buildParams(args, ["query", "start_time", "end_time", "size"]);
     const response = await this.axiosClient.get("/v1/events/inventory", { params });
@@ -1355,17 +960,9 @@ class DigiRemoteManagerServer {
   async listEventsBulk(args) {
     const params = this.buildParams(args, ["query", "start_time", "end_time", "fields"]);
     const response = await this.axiosClient.get("/v1/events/bulk", { params });
-    return {
-      content: [
-        {
-          type: "text",
-          text: response.data,
-        },
-      ],
-    };
+    return { content: [{ type: "text", text: response.data }] };
   }
 
-  // ==================== USER IMPLEMENTATIONS ====================
   async listUsers(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/users/inventory", { params });
@@ -1377,7 +974,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== API KEY IMPLEMENTATIONS ====================
   async listApiKeys(args) {
     const params = this.buildParams(args, ["orderby"]);
     const response = await this.axiosClient.get("/v1/api_keys/inventory", { params });
@@ -1389,7 +985,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== FILE IMPLEMENTATIONS ====================
   async listFiles(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/files/inventory", { params });
@@ -1401,7 +996,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== ACCOUNT IMPLEMENTATIONS ====================
   async getAccountInfo() {
     const response = await this.axiosClient.get("/v1/account");
     return this.formatResponse(response.data);
@@ -1409,14 +1003,11 @@ class DigiRemoteManagerServer {
 
   async getAccountSecurity(args) {
     const params = {};
-    if (args.system_defaults) {
-      params.system_defaults = "true";
-    }
+    if (args.system_defaults) params.system_defaults = "true";
     const response = await this.axiosClient.get("/v1/account/current/security", { params });
     return this.formatResponse(response.data);
   }
 
-  // ==================== UTILITY IMPLEMENTATIONS ====================
   async getApiInfo(args) {
     const endpoint = args.endpoint || "";
     const url = endpoint ? `/v1/${endpoint}` : "/v1";
@@ -1424,16 +1015,13 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  // ==================== SERVER RUNNER ====================
   async run() {
     const transportType = process.env.MCP_TRANSPORT || "stdio";
 
     if (transportType === "http") {
-      // HTTP/SSE transport for n8n and other HTTP clients
       const PORT = process.env.MCP_PORT || 3000;
       await this.startHttpServer(PORT);
     } else {
-      // Default stdio transport for Claude Desktop
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
       console.error("Digi Remote Manager MCP server running on stdio");
@@ -1445,23 +1033,20 @@ class DigiRemoteManagerServer {
     const cors = (await import("cors")).default;
 
     const app = express();
-    app.use(
-      cors({
-        origin: "*",
-        methods: ["GET", "POST", "OPTIONS", "DELETE"],
-        allowedHeaders: ["Content-Type", "Accept", "Mcp-Session-Id", "Last-Event-ID"],
-        exposedHeaders: ["Mcp-Session-Id"],
-      })
-    );
+    app.use(cors({
+      origin: "*",
+      methods: ["GET", "POST", "OPTIONS", "DELETE"],
+      allowedHeaders: ["Content-Type", "Accept", "Mcp-Session-Id", "Last-Event-ID"],
+      exposedHeaders: ["Mcp-Session-Id"],
+    }));
     app.use(express.json());
 
-    // Single MCP endpoint
     app.all("/mcp", async (req, res) => {
       console.error(`${req.method} /mcp - Request received`);
 
       try {
         const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: undefined, // Stateless mode
+          sessionIdGenerator: undefined,
           enableJsonResponse: true,
         });
 
@@ -1478,17 +1063,13 @@ class DigiRemoteManagerServer {
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: "2.0",
-            error: {
-              code: -32603,
-              message: "Internal server error",
-            },
+            error: { code: -32603, message: "Internal server error" },
             id: null,
           });
         }
       }
     });
 
-    // Health check endpoint
     app.get("/health", (req, res) => {
       res.json({
         status: "ok",
