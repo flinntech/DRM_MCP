@@ -87,6 +87,10 @@ class DigiRemoteManagerServer {
                 type: "string",
                 description: "Cursor for pagination",
               },
+              orderby: {
+                type: "string",
+                description: "Field to sort by with optional 'asc' or 'desc' (e.g., 'name desc')",
+              },
             },
           },
         },
@@ -425,6 +429,7 @@ class DigiRemoteManagerServer {
     if (args.query) params.query = args.query;
     if (args.size) params.size = args.size;
     if (args.cursor) params.cursor = args.cursor;
+    if (args.orderby) params.orderby = args.orderby;
 
     const response = await this.axiosClient.get("/v1/devices/inventory", { params });
     return {
