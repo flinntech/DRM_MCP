@@ -526,9 +526,9 @@ class DigiRemoteManagerServer {
           },
         },
 
-        // CONFIGS
+        // Templates
         {
-          name: "list_configs",
+          name: "list_templates",
           description: "List configuration templates",
           inputSchema: {
             type: "object",
@@ -539,8 +539,8 @@ class DigiRemoteManagerServer {
           },
         },
         {
-          name: "get_config",
-          description: "Get config details",
+          name: "get_template",
+          description: "Get template details",
           inputSchema: {
             type: "object",
             properties: {
@@ -623,29 +623,6 @@ class DigiRemoteManagerServer {
               user_id: { type: "string", description: "User ID" },
             },
             required: ["user_id"],
-          },
-        },
-
-        // API KEYS
-        {
-          name: "list_api_keys",
-          description: "List API keys",
-          inputSchema: {
-            type: "object",
-            properties: {
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_api_key",
-          description: "Get API key details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              api_key_id: { type: "string", description: "API key ID" },
-            },
-            required: ["api_key_id"],
           },
         },
 
@@ -749,8 +726,8 @@ class DigiRemoteManagerServer {
           case "get_device_report": return await this.getDeviceReport(args);
           case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
           case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
-          case "list_configs": return await this.listConfigs(args);
-          case "get_config": return await this.getConfig(args);
+          case "list_templates": return await this.listConfigs(args);
+          case "get_template": return await this.getConfig(args);
           case "list_health_configs": return await this.listHealthConfigs(args);
           case "get_health_config": return await this.getHealthConfig(args);
           case "list_events": return await this.listEvents(args);
@@ -1016,13 +993,13 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  async listConfigs(args) {
+  async listTemplates(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/configs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
-  async getConfig(args) {
+  async getTemplate(args) {
     const response = await this.axiosClient.get(`/v1/configs/inventory/${args.config_id}`);
     return this.formatResponse(response.data);
   }
