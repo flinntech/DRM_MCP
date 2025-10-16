@@ -104,19 +104,101 @@ class DigiRemoteManagerServer {
           },
         },
         {
-          name: "get_device_data_streams",
-          description: "Get device data streams with history",
+          name: "list_streams",
+          description: "List data streams. Filter by device using query like 'device_id=\"00000000-00000000-00409DFF-FF122B8E\"'",
           inputSchema: {
             type: "object",
             properties: {
-              device_id: { type: "string", description: "Device ID" },
-              stream_id: { type: "string", description: "Optional stream ID" },
+              query: { type: "string", description: "Query filter (e.g., device_id, description)" },
+              size: { type: "number", description: "Number of results" },
+              cursor: { type: "string", description: "Pagination cursor" },
+              orderby: { type: "string", description: "Sort field" },
+              category: { type: "string", description: "Filter by category" },
+            },
+          },
+        },
+        {
+          name: "list_streams_bulk",
+          description: "Export streams to CSV format",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Query filter" },
+              fields: { type: "string", description: "Comma-separated fields" },
+              orderby: { type: "string", description: "Sort field" },
+            },
+          },
+        },
+        {
+          name: "get_stream",
+          description: "Get details of a specific stream",
+          inputSchema: {
+            type: "object",
+            properties: {
+              stream_id: { type: "string", description: "Stream ID" },
+            },
+            required: ["stream_id"],
+          },
+        },
+        {
+          name: "get_stream_history",
+          description: "Get historical data points for a stream",
+          inputSchema: {
+            type: "object",
+            properties: {
+              stream_id: { type: "string", description: "Stream ID" },
               start_time: { type: "string", description: "Start time (ISO or '-1d')" },
               end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of points" },
+              size: { type: "number", description: "Number of data points" },
+              cursor: { type: "string", description: "Pagination cursor" },
+              order: { type: "string", description: "Sort order: 'asc' or 'desc'" },
+            },
+            required: ["stream_id"],
+          },
+        },
+        {
+          name: "get_stream_history_bulk",
+          description: "Export stream history to CSV format",
+          inputSchema: {
+            type: "object",
+            properties: {
+              stream_id: { type: "string", description: "Stream ID" },
+              start_time: { type: "string", description: "Start time" },
+              end_time: { type: "string", description: "End time" },
+              fields: { type: "string", description: "Comma-separated fields" },
+              order: { type: "string", description: "Sort order: 'asc' or 'desc'" },
+            },
+            required: ["stream_id"],
+          },
+        },
+        {
+          name: "get_stream_rollups",
+          description: "Get aggregated/rollup data for a stream (min, max, avg, sum over intervals)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              stream_id: { type: "string", description: "Stream ID" },
+              start_time: { type: "string", description: "Start time" },
+              end_time: { type: "string", description: "End time" },
+              interval: { type: "string", description: "Rollup interval (e.g., '1h', '1d', '1w')" },
+              method: { type: "string", description: "Aggregation method: min, max, avg, sum, count" },
+              size: { type: "number", description: "Number of rollup points" },
               cursor: { type: "string", description: "Pagination cursor" },
             },
-            required: ["device_id"],
+            required: ["stream_id"],
+          },
+        },
+        {
+          name: "get_stream_rollups_bulk",
+          description: "Export stream rollups to CSV format",
+          inputSchema: {
+            type: "object",
+            properties: {
+              stream_id: { type: "string", description: "Stream ID" },
+              interval: { type: "string", description: "Rollup interval" },
+              method: { type: "string", description: "Aggregation method" },
+            },
+            required: ["stream_id"],
           },
         },
         {
@@ -633,7 +715,13 @@ class DigiRemoteManagerServer {
           case "list_devices": return await this.listDevices(args);
           case "list_devices_bulk": return await this.listDevicesBulk(args);
           case "get_device": return await this.getDevice(args);
-          case "get_device_data_streams": return await this.getDeviceDataStreams(args);
+          case "list_streams": return await this.listStreams(args);
+          case "list_streams_bulk": return await this.listStreamsBulk(args);
+          case "get_stream": return await this.getStream(args);
+          case "get_stream_history": return await this.getStreamHistory(args);
+          case "get_stream_history_bulk": return await this.getStreamHistoryBulk(args);
+          case "get_stream_rollups": return await this.getStreamRollups(args);
+          case "get_stream_rollups_bulk": return await this.getStreamRollupsBulk(args);
           case "get_device_logs": return await this.getDeviceLogs(args);
           case "list_groups": return await this.listGroups(args);
           case "get_group": return await this.getGroup(args);
@@ -735,12 +823,45 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  async getDeviceDataStreams(args) {
-    let url = `/v1/streams/${args.device_id}`;
-    if (args.stream_id) url += `/${args.stream_id}`;
-    const params = this.buildParams(args, ["start_time", "end_time", "size", "cursor"]);
-    const response = await this.axiosClient.get(url, { params });
+  async listStreams(args) {
+    const params = this.buildParams(args, ["query", "size", "cursor", "orderby", "category"]);
+    const response = await this.axiosClient.get("/v1/streams/inventory", { params });
     return this.formatResponse(response.data);
+  }
+
+  async listStreamsBulk(args) {
+    const params = this.buildParams(args, ["query", "fields", "orderby"]);
+    const response = await this.axiosClient.get("/v1/streams/bulk", { params });
+    return { content: [{ type: "text", text: response.data }] };
+  }
+
+  async getStream(args) {
+    const response = await this.axiosClient.get(`/v1/streams/inventory/${args.stream_id}`);
+    return this.formatResponse(response.data);
+  }
+
+  async getStreamHistory(args) {
+    const params = this.buildParams(args, ["start_time", "end_time", "size", "cursor", "order"]);
+    const response = await this.axiosClient.get(`/v1/streams/history/${args.stream_id}`, { params });
+    return this.formatResponse(response.data);
+  }
+
+  async getStreamHistoryBulk(args) {
+    const params = this.buildParams(args, ["start_time", "end_time", "fields", "order"]);
+    const response = await this.axiosClient.get(`/v1/streams/bulk/history/${args.stream_id}`, { params });
+    return { content: [{ type: "text", text: response.data }] };
+  }
+
+  async getStreamRollups(args) {
+    const params = this.buildParams(args, ["start_time", "end_time", "interval", "method", "size", "cursor"]);
+    const response = await this.axiosClient.get(`/v1/streams/rollups/${args.stream_id}`, { params });
+    return this.formatResponse(response.data);
+  }
+
+  async getStreamRollupsBulk(args) {
+    const params = this.buildParams(args, ["interval", "method"]);
+    const response = await this.axiosClient.get(`/v1/streams/bulk/rollups/${args.stream_id}`, { params });
+    return { content: [{ type: "text", text: response.data }] };
   }
 
   async getDeviceLogs(args) {
@@ -1043,7 +1164,7 @@ class DigiRemoteManagerServer {
         version: '2.0.0',
         transport: 'streamable-http',
         endpoint: '/mcp',
-        tools: 45
+        tools: 51
       });
     });
     
