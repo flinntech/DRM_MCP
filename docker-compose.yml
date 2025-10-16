@@ -15,10 +15,18 @@ services:
       
       # Node.js environment
       - NODE_ENV=production
+      
+      #http stuff
+      - MCP_TRANSPORT=http
+      - MCP_PORT=3000
     
     # Since MCP uses stdio, we need to keep stdin open and allocate a tty
     stdin_open: true
     tty: true
+    
+    # Expose HTTP port for n8n and other clients
+    ports:
+      - "3000:3000"
     
     # Restart policy
     restart: unless-stopped
