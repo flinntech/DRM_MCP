@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Digi Remote Manager MCP Server - Enhanced Version
- * Full API coverage with 45+ tools
+ * Digi Remote Manager MCP Server - Dynamic Tools with OpenAPI Auto-Generation
+ * Automatically generates endpoint catalog from OpenAPI spec
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,14 +14,17 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
+import { readFileSync } from "fs";
+import { parse as parseYAML } from "yaml";
 
 const DRM_BASE_URL = "https://remotemanager.digi.com/ws";
 
 // ============================================
-// CONFIGURATION - Put your API key here
+// CONFIGURATION
 // ============================================
-const API_KEY_ID = "52ea20b6ea68ed00a5ceeb447cd13ba4";
-const API_KEY_SECRET = "3ef3cfa5df287fd884dfe1668c48484f39e2d92905d255bc38642fe07e352efd";
+const API_KEY_ID = process.env.DRM_API_KEY_ID || "52ea20b6ea68ed00a5ceeb447cd13ba4";
+const API_KEY_SECRET = process.env.DRM_API_KEY_SECRET || "3ef3cfa5df287fd884dfe1668c48484f39e2d92905d255bc38642fe07e352efd";
+const OPENAPI_SPEC_PATH = process.env.OPENAPI_SPEC_PATH || "./drm-api-readonly.yaml";
 // ============================================
 
 class DigiRemoteManagerServer {
@@ -31,7 +34,8 @@ class DigiRemoteManagerServer {
       console.error("║  ERROR: API key not configured                            ║");
       console.error("╚════════════════════════════════════════════════════════════╝");
       console.error("");
-      console.error("Please edit this file and configure your API key ID and secret.");
+      console.error("Please set DRM_API_KEY_ID and DRM_API_KEY_SECRET environment variables");
+      console.error("or edit the configuration section in this file.");
       console.error("");
       process.exit(1);
     }
@@ -48,10 +52,21 @@ class DigiRemoteManagerServer {
 
     console.error("✓ DRM MCP Server initialized with API Key authentication");
 
+    // Load OpenAPI spec and build catalog
+    try {
+      this.openApiSpec = this.loadOpenAPISpec(OPENAPI_SPEC_PATH);
+      this.endpointCatalog = this.buildEndpointCatalogFromOpenAPI();
+      console.error(`✓ Loaded ${this.endpointCatalog.length} endpoints from OpenAPI spec`);
+    } catch (error) {
+      console.error("✗ Failed to load OpenAPI spec:", error.message);
+      console.error("  Using fallback manual catalog");
+      this.endpointCatalog = this.buildFallbackCatalog();
+    }
+
     this.server = new Server(
       {
         name: "digi-remote-manager",
-        version: "2.0.0",
+        version: "3.0.0",
       },
       {
         capabilities: {
@@ -61,627 +76,321 @@ class DigiRemoteManagerServer {
     );
 
     this.setupHandlers();
+    
+    // Optional: Enable hot reload in development
+    if (process.env.ENABLE_HOT_RELOAD === 'true') {
+      this.enableHotReload();
+    }
+  }
+
+  loadOpenAPISpec(path) {
+    console.error(`Loading OpenAPI spec from: ${path}`);
+    const content = readFileSync(path, 'utf8');
+    return parseYAML(content);
+  }
+
+  buildEndpointCatalogFromOpenAPI() {
+    const catalog = [];
+    const spec = this.openApiSpec;
+
+    if (!spec.paths) {
+      throw new Error("Invalid OpenAPI spec: no paths found");
+    }
+
+    for (const [path, pathItem] of Object.entries(spec.paths)) {
+      for (const [method, operation] of Object.entries(pathItem)) {
+        if (method.toLowerCase() !== 'get') continue; // Read-only spec
+
+        const operationId = operation.operationId;
+        if (!operationId) continue;
+
+        // Determine category from tags or path
+        let category = 'other';
+        if (operation.tags && operation.tags.length > 0) {
+          category = operation.tags[0].toLowerCase();
+        } else {
+          // Infer from path
+          const pathParts = path.split('/').filter(p => p);
+          if (pathParts.length > 1) {
+            category = pathParts[1]; // /v1/devices -> devices
+          }
+        }
+
+        // Map operationId to method name
+        const methodName = this.mapOperationIdToMethod(operationId);
+        const methodFn = this[methodName];
+
+        if (!methodFn) {
+          console.error(`⚠ Warning: No method found for ${operationId} (expected ${methodName})`);
+          continue;
+        }
+
+        // Extract parameters
+        const params = this.extractParamsFromOpenAPI(operation, path);
+
+        catalog.push({
+          operation_id: operationId,
+          category: category,
+          description: operation.description || operation.summary || `${method.toUpperCase()} ${path}`,
+          method: methodFn.bind(this),
+          params: params,
+          path: path,
+          httpMethod: method.toUpperCase()
+        });
+      }
+    }
+
+    return catalog;
+  }
+
+  mapOperationIdToMethod(operationId) {
+    // Common patterns:
+    // listDevices -> listDevices
+    // getDevice -> getDevice
+    // getCellularUtilizationReport -> getCellularUtilizationReport
+    
+    // Handle special cases
+    const mappings = {
+      'listDevicesBulk': 'listDevicesBulk',
+      'getDeviceChannel': 'getDeviceChannel',
+      'listDeviceChannels': 'listDeviceChannels',
+      'listReportTypes': 'listReports',
+      'getConnectionReport': 'getConnectionReport',
+      'getAlertReport': 'getAlertReport',
+      'getDeviceReport': 'getDeviceReport',
+      'listConfigurations': 'listConfigs',
+      'getConfiguration': 'getConfig',
+    };
+
+    if (mappings[operationId]) {
+      return mappings[operationId];
+    }
+
+    // Default: keep as-is (already in correct format)
+    return operationId;
+  }
+
+  extractParamsFromOpenAPI(operation, path) {
+    const params = [];
+
+    // Extract path parameters
+    const pathParamRegex = /\{([^}]+)\}/g;
+    let match;
+    while ((match = pathParamRegex.exec(path)) !== null) {
+      const paramName = match[1];
+      params.push({
+        name: paramName,
+        type: 'string',
+        required: true,
+        description: `Path parameter: ${paramName}`,
+        in: 'path'
+      });
+    }
+
+    // Extract query parameters
+    if (operation.parameters) {
+      for (const param of operation.parameters) {
+        const p = param.$ref ? this.resolveRef(param.$ref) : param;
+        
+        if (p.in === 'path') {
+          // Already handled above, but update with OpenAPI details
+          const existing = params.find(pr => pr.name === p.name);
+          if (existing) {
+            existing.description = p.description || existing.description;
+            existing.type = p.schema?.type || existing.type;
+            if (p.example || p.schema?.example) {
+              existing.example = p.example || p.schema?.example;
+            }
+          }
+        } else if (p.in === 'query') {
+          params.push({
+            name: p.name,
+            type: p.schema?.type || 'string',
+            required: p.required || false,
+            description: p.description || '',
+            example: p.example || p.schema?.example,
+            in: 'query'
+          });
+        }
+      }
+    }
+
+    return params;
+  }
+
+  resolveRef(ref) {
+    // Resolve $ref pointers like #/components/parameters/deviceId
+    const path = ref.replace('#/', '').split('/');
+    let current = this.openApiSpec;
+    for (const segment of path) {
+      current = current[segment];
+      if (!current) return {};
+    }
+    return current;
+  }
+
+  buildFallbackCatalog() {
+    // Minimal fallback catalog if OpenAPI spec fails to load
+    console.error("⚠ Using minimal fallback catalog");
+    return [
+      {
+        operation_id: "list_devices",
+        category: "devices",
+        description: "List all devices",
+        method: this.listDevices.bind(this),
+        params: [
+          { name: "query", type: "string", required: false, description: "Query filter" },
+          { name: "size", type: "number", required: false, description: "Number of results" }
+        ]
+      },
+      {
+        operation_id: "get_device",
+        category: "devices",
+        description: "Get device by ID",
+        method: this.getDevice.bind(this),
+        params: [
+          { name: "device_id", type: "string", required: true, description: "Device ID" }
+        ]
+      }
+    ];
+  }
+
+  enableHotReload() {
+    import('chokidar').then(({ default: chokidar }) => {
+      console.error(`🔥 Hot reload enabled for ${OPENAPI_SPEC_PATH}`);
+      chokidar.watch(OPENAPI_SPEC_PATH).on('change', () => {
+        console.error('📝 OpenAPI spec changed, reloading catalog...');
+        try {
+          this.openApiSpec = this.loadOpenAPISpec(OPENAPI_SPEC_PATH);
+          this.endpointCatalog = this.buildEndpointCatalogFromOpenAPI();
+          console.error(`✓ Reloaded ${this.endpointCatalog.length} endpoints`);
+        } catch (error) {
+          console.error('✗ Failed to reload:', error.message);
+        }
+      });
+    }).catch(() => {
+      console.error('⚠ chokidar not installed, hot reload disabled');
+    });
   }
 
   setupHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
-        // DEVICES
         {
-          name: "list_devices",
-          description: "List all devices. Supports advanced queries like: 'connection_status=\"connected\"', 'signal_percent<50', 'group startsWith \"/Production\"'",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              orderby: { type: "string", description: "Sort field (e.g., 'name desc')" },
-            },
-          },
-        },
-        {
-          name: "list_devices_bulk",
-          description: "Export devices to CSV format",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              fields: { type: "string", description: "Comma-separated field list" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_device",
-          description: "Get device details by ID",
-          inputSchema: {
-            type: "object",
-            properties: {
-              device_id: { type: "string", description: "Device ID" },
-            },
-            required: ["device_id"],
-          },
-        },
-        {
-          name: "list_streams",
-          description: "List data streams. Filter by device using query like 'device_id=\"00000000-00000000-00409DFF-FF122B8E\"'",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter (e.g., device_id, description)" },
-              size: { type: "number", description: "Number of results" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              orderby: { type: "string", description: "Sort field" },
-              category: { type: "string", description: "Filter by category" },
-            },
-          },
-        },
-        {
-          name: "list_streams_bulk",
-          description: "Export streams to CSV format",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              fields: { type: "string", description: "Comma-separated fields" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_stream",
-          description: "Get details of a specific stream",
-          inputSchema: {
-            type: "object",
-            properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-            },
-            required: ["stream_id"],
-          },
-        },
-        {
-          name: "get_stream_history",
-          description: "Get historical data points for a stream",
-          inputSchema: {
-            type: "object",
-            properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              start_time: { type: "string", description: "Start time (ISO or '-1d')" },
-              end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of data points" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              order: { type: "string", description: "Sort order: 'asc' or 'desc'" },
-            },
-            required: ["stream_id"],
-          },
-        },
-        {
-          name: "get_stream_history_bulk",
-          description: "Export stream history to CSV format",
-          inputSchema: {
-            type: "object",
-            properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              fields: { type: "string", description: "Comma-separated fields" },
-              order: { type: "string", description: "Sort order: 'asc' or 'desc'" },
-            },
-            required: ["stream_id"],
-          },
-        },
-        {
-          name: "get_stream_rollups",
-          description: "Get aggregated/rollup data for a stream (min, max, avg, sum over intervals)",
-          inputSchema: {
-            type: "object",
-            properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              interval: { type: "string", description: "Rollup interval (e.g., '1h', '1d', '1w')" },
-              method: { type: "string", description: "Aggregation method: min, max, avg, sum, count" },
-              size: { type: "number", description: "Number of rollup points" },
-              cursor: { type: "string", description: "Pagination cursor" },
-            },
-            required: ["stream_id"],
-          },
-        },
-        {
-          name: "get_stream_rollups_bulk",
-          description: "Export stream rollups to CSV format",
-          inputSchema: {
-            type: "object",
-            properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              interval: { type: "string", description: "Rollup interval" },
-              method: { type: "string", description: "Aggregation method" },
-            },
-            required: ["stream_id"],
-          },
-        },
-        {
-          name: "get_device_logs",
-          description: "Get device logs for troubleshooting",
-          inputSchema: {
-            type: "object",
-            properties: {
-              device_id: { type: "string", description: "Device ID" },
-              start_time: { type: "string", description: "Start time" },
-              size: { type: "number", description: "Number of entries" },
-            },
-            required: ["device_id"],
-          },
-        },
+          name: "discover_endpoints",
+          description: `Discover available DRM API endpoints. Use this FIRST to find the right endpoint for your task.
 
-        // GROUPS
-        {
-          name: "list_groups",
-          description: "List device groups",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_group",
-          description: "Get group details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              group_id: { type: "string", description: "Group ID" },
-            },
-            required: ["group_id"],
-          },
-        },
+Filter by category:
+- devices: List/get devices, device logs
+- streams: Data streams, history, rollups (formerly "data streams")
+- groups: Device organization
+- alerts: Alert configurations
+- monitors: Webhooks and monitoring
+- automations: Automation workflows, runs, schedules
+- jobs: Background jobs (firmware updates, configs)
+- firmware: Firmware versions and updates
+- reports: Connection, alert, device, cellular, availability reports
+- configurations: Configuration templates (formerly "templates")
+- health: Health monitoring configs
+- events: Audit trail and event logs
+- users: User management
+- files: File storage
+- account: Account information and settings
 
-        // ALERTS
-        {
-          name: "list_alerts",
-          description: "List configured alerts",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_alert",
-          description: "Get alert details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              alert_id: { type: "string", description: "Alert ID" },
-            },
-            required: ["alert_id"],
-          },
-        },
+Search by keyword to find specific functionality (e.g., "cellular", "logs", "availability").
 
-        // MONITORS
-        {
-          name: "list_monitors",
-          description: "List monitors (webhooks)",
+Returns: List of matching endpoints with descriptions and required parameters.`,
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
+              category: {
+                type: "string",
+                description: "Filter by category",
+                enum: ["devices", "streams", "groups", "alerts", "monitors", "automations", 
+                       "jobs", "firmware", "reports", "configurations", "health", "events", 
+                       "users", "files", "account", "device data", "meta"]
+              },
+              query: {
+                type: "string",
+                description: "Search keyword (e.g., 'cellular', 'logs', 'availability')"
+              },
+              limit: {
+                type: "number",
+                description: "Maximum results to return (default: 20)",
+                default: 20
+              }
+            }
+          }
         },
         {
-          name: "get_monitor",
-          description: "Get monitor details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              monitor_id: { type: "string", description: "Monitor ID" },
-            },
-            required: ["monitor_id"],
-          },
-        },
-        {
-          name: "get_monitor_history",
-          description: "Get monitor polling history",
-          inputSchema: {
-            type: "object",
-            properties: {
-              monitor_id: { type: "string", description: "Monitor ID" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of entries" },
-            },
-            required: ["monitor_id"],
-          },
-        },
+          name: "get_endpoint_details",
+          description: `Get detailed information about a specific API endpoint.
 
-        // AUTOMATIONS
-        {
-          name: "list_automations",
-          description: "List automations",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_automation",
-          description: "Get automation details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              automation_id: { type: "string", description: "Automation ID" },
-            },
-            required: ["automation_id"],
-          },
-        },
-        {
-          name: "list_automation_runs",
-          description: "List automation execution history",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_automation_run",
-          description: "Get automation run details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              run_id: { type: "string", description: "Run ID" },
-            },
-            required: ["run_id"],
-          },
-        },
-        {
-          name: "list_automation_schedules",
-          description: "List automation schedules",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_automation_schedule",
-          description: "Get schedule details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              schedule_id: { type: "string", description: "Schedule ID" },
-            },
-            required: ["schedule_id"],
-          },
-        },
+Use this after discover_endpoints to see:
+- Full description
+- All parameters (required and optional)
+- Parameter types and examples
+- Usage notes
 
-        // JOBS
-        {
-          name: "list_jobs",
-          description: "List jobs (firmware updates, configs, etc.)",
+Provide the operation_id from discover_endpoints (e.g., "listDevices", "getCellularUtilizationReport").`,
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              orderby: { type: "string", description: "Sort field" },
+              operation_id: {
+                type: "string",
+                description: "The operation ID from discover_endpoints"
+              }
             },
-          },
+            required: ["operation_id"]
+          }
         },
         {
-          name: "list_jobs_bulk",
-          description: "Export jobs to CSV",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              fields: { type: "string", description: "Comma-separated fields" },
-            },
-          },
-        },
-        {
-          name: "get_job",
-          description: "Get job details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              job_id: { type: "string", description: "Job ID" },
-            },
-            required: ["job_id"],
-          },
-        },
+          name: "call_drm_endpoint",
+          description: `Execute a DRM API endpoint with parameters.
 
-        // FIRMWARE
-        {
-          name: "list_firmware",
-          description: "List firmware versions",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_firmware",
-          description: "Get firmware details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              firmware_id: { type: "string", description: "Firmware ID" },
-            },
-            required: ["firmware_id"],
-          },
-        },
-        {
-          name: "list_firmware_updates",
-          description: "List firmware update operations",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_firmware_update",
-          description: "Get firmware update status",
-          inputSchema: {
-            type: "object",
-            properties: {
-              update_id: { type: "string", description: "Update ID" },
-            },
-            required: ["update_id"],
-          },
-        },
+This is the main tool for retrieving data. Use discover_endpoints first to find the right endpoint.
 
-        // REPORTS
-        {
-          name: "list_reports",
-          description: "List available report types",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "get_connection_report",
-          description: "Get connection status summary",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              group: { type: "string", description: "Limit to group" },
-            },
-          },
-        },
-        {
-          name: "get_alert_report",
-          description: "Get alert summary",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-            },
-          },
-        },
-        {
-          name: "get_device_report",
-          description: "Get device summary by dimension: health_status, firmware_version, connection_status, carrier, signal_percent, type, vendor_id, restricted_status, compliance, tags",
-          inputSchema: {
-            type: "object",
-            properties: {
-              report_type: { type: "string", description: "Report dimension" },
-              query: { type: "string", description: "Query filter" },
-              group: { type: "string", description: "Limit to group" },
-              scope: { type: "string", description: "For cellular: primary/secondary" },
-            },
-            required: ["report_type"],
-          },
-        },
-        {
-          name: "get_cellular_utilization_report",
-          description: "Get cellular data usage statistics",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              query: { type: "string", description: "Query filter" },
-            },
-          },
-        },
-        {
-          name: "get_device_availability_report",
-          description: "Get device uptime statistics",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              query: { type: "string", description: "Query filter" },
-            },
-          },
-        },
+Common usage patterns:
 
-        // Templates
-        {
-          name: "list_templates",
-          description: "List configuration templates",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_template",
-          description: "Get template details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              config_id: { type: "string", description: "Config ID" },
-            },
-            required: ["config_id"],
-          },
-        },
+1. List connected devices:
+   operation_id: "listDevices"
+   params: {query: "connection_status='connected'", size: 100}
 
-        // HEALTH CONFIGS
-        {
-          name: "list_health_configs",
-          description: "List health monitoring configurations",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_health_config",
-          description: "Get health config details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              health_config_id: { type: "string", description: "Health config ID" },
-            },
-            required: ["health_config_id"],
-          },
-        },
+2. Get device details:
+   operation_id: "getDevice"
+   params: {device_id: "00000000-00000000-00409DFF-FF123456"}
 
-        // EVENTS
-        {
-          name: "list_events",
-          description: "List events from event log (audit trail)",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of events" },
-            },
-          },
-        },
-        {
-          name: "list_events_bulk",
-          description: "Export events to CSV",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              fields: { type: "string", description: "Comma-separated fields" },
-            },
-          },
-        },
+3. Get cellular usage report:
+   operation_id: "getCellularUtilizationReport"
+   params: {start_time: "2025-10-01T00:00:00Z", end_time: "2025-10-16T23:59:59Z"}
 
-        // USERS
-        {
-          name: "list_users",
-          description: "List users",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_user",
-          description: "Get user details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              user_id: { type: "string", description: "User ID" },
-            },
-            required: ["user_id"],
-          },
-        },
+4. List streams for a device:
+   operation_id: "listStreams"
+   params: {query: "device_id='00000000-00000000-00409DFF-FF123456'"}
 
-        // FILES
-        {
-          name: "list_files",
-          description: "List files",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
-            },
-          },
-        },
-        {
-          name: "get_file",
-          description: "Get file details",
-          inputSchema: {
-            type: "object",
-            properties: {
-              file_id: { type: "string", description: "File ID" },
-            },
-            required: ["file_id"],
-          },
-        },
+5. Get stream history:
+   operation_id: "getStreamHistory"
+   params: {stream_id: "stream-id-here", start_time: "-7d"}
 
-        // ACCOUNT
-        {
-          name: "get_account_info",
-          description: "Get account information",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "get_account_security",
-          description: "Get account security settings",
+Query language operators: =, !=, <, >, <=, >=, startsWith, endsWith, contains
+Time formats: ISO 8601 or relative like "-1d", "-24h", "-7d"`,
           inputSchema: {
             type: "object",
             properties: {
-              system_defaults: { type: "boolean", description: "Get system defaults" },
+              operation_id: {
+                type: "string",
+                description: "The endpoint operation ID (from discover_endpoints)"
+              },
+              params: {
+                type: "object",
+                description: "Parameters for the endpoint (e.g., {device_id: 'xxx', query: 'yyy', size: 100})",
+                additionalProperties: true
+              }
             },
-          },
-        },
-
-        // UTILITY
-        {
-          name: "get_api_info",
-          description: "Get self-documented API info for endpoint discovery",
-          inputSchema: {
-            type: "object",
-            properties: {
-              endpoint: { type: "string", description: "Endpoint name or empty for top-level" },
-            },
-          },
-        },
-      ],
+            required: ["operation_id"]
+          }
+        }
+      ]
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -689,58 +398,15 @@ class DigiRemoteManagerServer {
         const { name, arguments: args } = request.params;
 
         switch (name) {
-          case "list_devices": return await this.listDevices(args);
-          case "list_devices_bulk": return await this.listDevicesBulk(args);
-          case "get_device": return await this.getDevice(args);
-          case "list_streams": return await this.listStreams(args);
-          case "list_streams_bulk": return await this.listStreamsBulk(args);
-          case "get_stream": return await this.getStream(args);
-          case "get_stream_history": return await this.getStreamHistory(args);
-          case "get_stream_history_bulk": return await this.getStreamHistoryBulk(args);
-          case "get_stream_rollups": return await this.getStreamRollups(args);
-          case "get_stream_rollups_bulk": return await this.getStreamRollupsBulk(args);
-          case "get_device_logs": return await this.getDeviceLogs(args);
-          case "list_groups": return await this.listGroups(args);
-          case "get_group": return await this.getGroup(args);
-          case "list_alerts": return await this.listAlerts(args);
-          case "get_alert": return await this.getAlert(args);
-          case "list_monitors": return await this.listMonitors(args);
-          case "get_monitor": return await this.getMonitor(args);
-          case "get_monitor_history": return await this.getMonitorHistory(args);
-          case "list_automations": return await this.listAutomations(args);
-          case "get_automation": return await this.getAutomation(args);
-          case "list_automation_runs": return await this.listAutomationRuns(args);
-          case "get_automation_run": return await this.getAutomationRun(args);
-          case "list_automation_schedules": return await this.listAutomationSchedules(args);
-          case "get_automation_schedule": return await this.getAutomationSchedule(args);
-          case "list_jobs": return await this.listJobs(args);
-          case "list_jobs_bulk": return await this.listJobsBulk(args);
-          case "get_job": return await this.getJob(args);
-          case "list_firmware": return await this.listFirmware(args);
-          case "get_firmware": return await this.getFirmware(args);
-          case "list_firmware_updates": return await this.listFirmwareUpdates(args);
-          case "get_firmware_update": return await this.getFirmwareUpdate(args);
-          case "list_reports": return await this.listReports(args);
-          case "get_connection_report": return await this.getConnectionReport(args);
-          case "get_alert_report": return await this.getAlertReport(args);
-          case "get_device_report": return await this.getDeviceReport(args);
-          case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
-          case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
-          case "list_templates": return await this.listConfigs(args);
-          case "get_template": return await this.getConfig(args);
-          case "list_health_configs": return await this.listHealthConfigs(args);
-          case "get_health_config": return await this.getHealthConfig(args);
-          case "list_events": return await this.listEvents(args);
-          case "list_events_bulk": return await this.listEventsBulk(args);
-          case "list_users": return await this.listUsers(args);
-          case "get_user": return await this.getUser(args);
-          case "list_api_keys": return await this.listApiKeys(args);
-          case "get_api_key": return await this.getApiKey(args);
-          case "list_files": return await this.listFiles(args);
-          case "get_file": return await this.getFile(args);
-          case "get_account_info": return await this.getAccountInfo(args);
-          case "get_account_security": return await this.getAccountSecurity(args);
-          case "get_api_info": return await this.getApiInfo(args);
+          case "discover_endpoints":
+            return this.discoverEndpoints(args);
+          
+          case "get_endpoint_details":
+            return this.getEndpointDetails(args);
+          
+          case "call_drm_endpoint":
+            return this.callDrmEndpoint(args);
+          
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -771,6 +437,223 @@ class DigiRemoteManagerServer {
     });
   }
 
+  discoverEndpoints(args) {
+    const { category, query, limit = 20 } = args;
+    
+    let filtered = this.endpointCatalog;
+    
+    // Filter by category
+    if (category) {
+      filtered = filtered.filter(e => e.category === category.toLowerCase());
+    }
+    
+    // Search by keyword
+    if (query) {
+      const lowerQuery = query.toLowerCase();
+      filtered = filtered.filter(e => 
+        e.operation_id.toLowerCase().includes(lowerQuery) ||
+        e.description.toLowerCase().includes(lowerQuery) ||
+        e.category.toLowerCase().includes(lowerQuery)
+      );
+    }
+    
+    const limited = filtered.slice(0, limit);
+    
+    let result = `Found ${filtered.length} matching endpoint${filtered.length !== 1 ? 's' : ''}`;
+    if (limited.length < filtered.length) {
+      result += ` (showing first ${limit})`;
+    }
+    result += `:\n\n`;
+    
+    for (const endpoint of limited) {
+      result += `## ${endpoint.operation_id}\n`;
+      result += `**Category:** ${endpoint.category}\n`;
+      result += `**Description:** ${endpoint.description}\n`;
+      
+      const requiredParams = endpoint.params.filter(p => p.required);
+      const optionalParams = endpoint.params.filter(p => !p.required);
+      
+      if (requiredParams.length > 0) {
+        result += `**Required:** ${requiredParams.map(p => p.name).join(', ')}\n`;
+      }
+      if (optionalParams.length > 0) {
+        result += `**Optional:** ${optionalParams.map(p => p.name).join(', ')}\n`;
+      }
+      
+      result += `\n`;
+    }
+    
+    if (limited.length < filtered.length) {
+      result += `\n... and ${filtered.length - limited.length} more endpoint${filtered.length - limited.length !== 1 ? 's' : ''}.\n`;
+      result += `Use a more specific category or query to narrow results.\n`;
+    }
+    
+    result += `\n**Next step:** Use get_endpoint_details with the operation_id to see full parameter information before calling.`;
+    
+    return {
+      content: [{ type: "text", text: result }]
+    };
+  }
+
+  getEndpointDetails(args) {
+    const { operation_id } = args;
+    
+    const endpoint = this.endpointCatalog.find(e => e.operation_id === operation_id);
+    
+    if (!endpoint) {
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Error: Endpoint '${operation_id}' not found.\n\nUse discover_endpoints to find available endpoints.` 
+        }],
+        isError: true
+      };
+    }
+    
+    let details = `# ${endpoint.operation_id}\n\n`;
+    details += `**Category:** ${endpoint.category}\n`;
+    details += `**HTTP:** ${endpoint.httpMethod} ${endpoint.path}\n\n`;
+    details += `**Description:**\n${endpoint.description}\n\n`;
+    
+    if (endpoint.params.length > 0) {
+      details += `**Parameters:**\n\n`;
+      
+      const requiredParams = endpoint.params.filter(p => p.required);
+      const optionalParams = endpoint.params.filter(p => !p.required);
+      
+      if (requiredParams.length > 0) {
+        details += `*Required:*\n`;
+        for (const param of requiredParams) {
+          details += `- **${param.name}** (${param.type}): ${param.description}\n`;
+          if (param.example) {
+            details += `  Example: \`${param.example}\`\n`;
+          }
+        }
+        details += `\n`;
+      }
+      
+      if (optionalParams.length > 0) {
+        details += `*Optional:*\n`;
+        for (const param of optionalParams) {
+          details += `- **${param.name}** (${param.type}): ${param.description}\n`;
+          if (param.example) {
+            details += `  Example: \`${param.example}\`\n`;
+          }
+        }
+      }
+    } else {
+      details += `**Parameters:** None\n`;
+    }
+    
+    details += `\n**Usage:**\n`;
+    details += `Use call_drm_endpoint with:\n`;
+    details += `\`\`\`json\n`;
+    details += `{\n`;
+    details += `  "operation_id": "${operation_id}",\n`;
+    details += `  "params": {\n`;
+    
+    const exampleParams = endpoint.params
+      .filter(p => p.required || p.example)
+      .slice(0, 3);
+    
+    if (exampleParams.length > 0) {
+      for (let i = 0; i < exampleParams.length; i++) {
+        const param = exampleParams[i];
+        const value = param.example || (param.type === 'string' ? '"value"' : param.type === 'number' ? '100' : 'true');
+        details += `    "${param.name}": ${param.type === 'string' && !param.example ? value : JSON.stringify(value)}`;
+        if (i < exampleParams.length - 1) details += ',';
+        details += `\n`;
+      }
+    }
+    
+    details += `  }\n`;
+    details += `}\n`;
+    details += `\`\`\``;
+    
+    return {
+      content: [{ type: "text", text: details }]
+    };
+  }
+
+  async callDrmEndpoint(args) {
+    const { operation_id, params = {} } = args;
+    
+    const endpoint = this.endpointCatalog.find(e => e.operation_id === operation_id);
+    
+    if (!endpoint) {
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Error: Endpoint '${operation_id}' not found.\n\nUse discover_endpoints to find available endpoints.` 
+        }],
+        isError: true
+      };
+    }
+    
+    // Validate required parameters
+    const requiredParams = endpoint.params.filter(p => p.required);
+    const missingParams = requiredParams.filter(p => params[p.name] === undefined);
+    
+    if (missingParams.length > 0) {
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Error: Missing required parameters: ${missingParams.map(p => p.name).join(', ')}\n\nUse get_endpoint_details('${operation_id}') to see all required parameters.` 
+        }],
+        isError: true
+      };
+    }
+    
+    // Call the actual method
+    try {
+      const result = await endpoint.method(params);
+      
+      // Add a summary header for better readability
+      let responseText = `✓ **${operation_id}** executed successfully\n\n`;
+      
+      // Check if result has data to parse
+      if (result.content && result.content[0]) {
+        const content = result.content[0].text;
+        
+        // Try to parse as JSON to add helpful summary
+        try {
+          const data = JSON.parse(content);
+          
+          // Add contextual summary based on response type
+          if (data.items && Array.isArray(data.items)) {
+            responseText += `**Summary:** Returned ${data.items.length} item${data.items.length !== 1 ? 's' : ''}`;
+            if (data.total) {
+              responseText += ` of ${data.total} total`;
+            }
+            if (data.cursor) {
+              responseText += ` (paginated)`;
+            }
+            responseText += `\n\n`;
+          } else if (data.count !== undefined) {
+            responseText += `**Summary:** ${data.count} item${data.count !== 1 ? 's' : ''}\n\n`;
+          } else if (data.id) {
+            responseText += `**Resource ID:** ${data.id}\n\n`;
+          }
+          
+          responseText += `**Response:**\n\`\`\`json\n${content}\n\`\`\``;
+        } catch (e) {
+          // Not JSON (probably CSV), just return as-is
+          responseText += `**Response:**\n\`\`\`\n${content}\n\`\`\``;
+        }
+      }
+      
+      return {
+        content: [{ type: "text", text: responseText }]
+      };
+    } catch (error) {
+      throw error; // Let the main error handler deal with it
+    }
+  }
+
+  // ============================================
+  // UTILITY METHODS
+  // ============================================
+
   buildParams(args, allowed) {
     const params = {};
     for (const p of allowed) {
@@ -783,8 +666,13 @@ class DigiRemoteManagerServer {
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
 
+  // ============================================
+  // API IMPLEMENTATION METHODS
+  // Keep all your existing 51 methods here
+  // ============================================
+
   async listDevices(args) {
-    const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
+    const params = this.buildParams(args, ["query", "size", "cursor", "orderby", "group", "child_groups", "tag", "type"]);
     const response = await this.axiosClient.get("/v1/devices/inventory", { params });
     return this.formatResponse(response.data);
   }
@@ -796,7 +684,7 @@ class DigiRemoteManagerServer {
   }
 
   async getDevice(args) {
-    const response = await this.axiosClient.get(`/v1/devices/inventory/${args.device_id}`);
+    const response = await this.axiosClient.get(`/v1/devices/inventory/${args.device_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
@@ -813,114 +701,118 @@ class DigiRemoteManagerServer {
   }
 
   async getStream(args) {
-    const response = await this.axiosClient.get(`/v1/streams/inventory/${args.stream_id}`);
+    const response = await this.axiosClient.get(`/v1/streams/inventory/${args.stream_id || args.device_id + '/' + args.stream_id}`);
     return this.formatResponse(response.data);
   }
 
   async getStreamHistory(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "size", "cursor", "order"]);
-    const response = await this.axiosClient.get(`/v1/streams/history/${args.stream_id}`, { params });
+    const streamPath = args.stream_id.includes('/') ? args.stream_id : `${args.device_id}/${args.stream_id}`;
+    const response = await this.axiosClient.get(`/v1/streams/history/${streamPath}`, { params });
     return this.formatResponse(response.data);
   }
 
   async getStreamHistoryBulk(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "fields", "order"]);
-    const response = await this.axiosClient.get(`/v1/streams/bulk/history/${args.stream_id}`, { params });
+    const streamPath = args.stream_id.includes('/') ? args.stream_id : `${args.device_id}/${args.stream_id}`;
+    const response = await this.axiosClient.get(`/v1/streams/bulk/history/${streamPath}`, { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getStreamRollups(args) {
-    const params = this.buildParams(args, ["start_time", "end_time", "interval", "method", "size", "cursor"]);
-    const response = await this.axiosClient.get(`/v1/streams/rollups/${args.stream_id}`, { params });
+    const params = this.buildParams(args, ["start_time", "end_time", "interval", "method", "size", "cursor", "rollup_interval"]);
+    const streamPath = args.stream_id.includes('/') ? args.stream_id : `${args.device_id}/${args.stream_id}`;
+    const response = await this.axiosClient.get(`/v1/streams/rollups/${streamPath}`, { params });
     return this.formatResponse(response.data);
   }
 
   async getStreamRollupsBulk(args) {
-    const params = this.buildParams(args, ["interval", "method"]);
-    const response = await this.axiosClient.get(`/v1/streams/bulk/rollups/${args.stream_id}`, { params });
+    const params = this.buildParams(args, ["interval", "method", "rollup_interval"]);
+    const streamPath = args.stream_id.includes('/') ? args.stream_id : `${args.device_id}/${args.stream_id}`;
+    const response = await this.axiosClient.get(`/v1/streams/bulk/rollups/${streamPath}`, { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getDeviceLogs(args) {
-    const params = this.buildParams(args, ["start_time", "size"]);
-    const response = await this.axiosClient.get(`/v1/device_logs/inventory/${args.device_id}`, { params });
+    const params = this.buildParams(args, ["start_time", "size", "end_time"]);
+    const response = await this.axiosClient.get(`/v1/device_logs/inventory/${args.device_id || args.id}`, { params });
     return this.formatResponse(response.data);
   }
 
   async listGroups(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/groups/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getGroup(args) {
-    const response = await this.axiosClient.get(`/v1/groups/inventory/${args.group_id}`);
+    const response = await this.axiosClient.get(`/v1/groups/inventory/${args.group_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listAlerts(args) {
-    const params = this.buildParams(args, ["query", "size", "orderby"]);
+    const params = this.buildParams(args, ["query", "size", "orderby", "cursor"]);
     const response = await this.axiosClient.get("/v1/alerts/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAlert(args) {
-    const response = await this.axiosClient.get(`/v1/alerts/inventory/${args.alert_id}`);
+    const response = await this.axiosClient.get(`/v1/alerts/inventory/${args.alert_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listMonitors(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/monitors/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getMonitor(args) {
-    const response = await this.axiosClient.get(`/v1/monitors/inventory/${args.monitor_id}`);
+    const response = await this.axiosClient.get(`/v1/monitors/inventory/${args.monitor_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async getMonitorHistory(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "size"]);
-    const response = await this.axiosClient.get(`/v1/monitors/history/${args.monitor_id}`, { params });
+    const response = await this.axiosClient.get(`/v1/monitors/history/${args.monitor_id || args.id}`, { params });
     return this.formatResponse(response.data);
   }
 
   async listAutomations(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/automations/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAutomation(args) {
-    const response = await this.axiosClient.get(`/v1/automations/inventory/${args.automation_id}`);
+    const response = await this.axiosClient.get(`/v1/automations/inventory/${args.automation_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listAutomationRuns(args) {
-    const params = this.buildParams(args, ["query", "size", "orderby"]);
+    const params = this.buildParams(args, ["query", "size", "orderby", "cursor"]);
     const response = await this.axiosClient.get("/v1/automations/runs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAutomationRun(args) {
-    const response = await this.axiosClient.get(`/v1/automations/runs/inventory/${args.run_id}`);
+    const response = await this.axiosClient.get(`/v1/automations/runs/inventory/${args.run_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listAutomationSchedules(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/automations/schedules/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAutomationSchedule(args) {
-    const response = await this.axiosClient.get(`/v1/automations/schedules/inventory/${args.schedule_id}`);
+    const response = await this.axiosClient.get(`/v1/automations/schedules/inventory/${args.schedule_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listJobs(args) {
-    const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
+    const params = this.buildParams(args, ["query", "size", "cursor", "orderby", "status"]);
     const response = await this.axiosClient.get("/v1/jobs/inventory", { params });
     return this.formatResponse(response.data);
   }
@@ -932,29 +824,29 @@ class DigiRemoteManagerServer {
   }
 
   async getJob(args) {
-    const response = await this.axiosClient.get(`/v1/jobs/inventory/${args.job_id}`);
+    const response = await this.axiosClient.get(`/v1/jobs/inventory/${args.job_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listFirmware(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "vendor_id", "device_type", "include_non_production"]);
     const response = await this.axiosClient.get("/v1/firmware/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getFirmware(args) {
-    const response = await this.axiosClient.get(`/v1/firmware/inventory/${args.firmware_id}`);
+    const response = await this.axiosClient.get(`/v1/firmware/inventory/${args.firmware_id || args.vendor_id + '/' + args.device_type}`);
     return this.formatResponse(response.data);
   }
 
   async listFirmwareUpdates(args) {
-    const params = this.buildParams(args, ["query", "size", "orderby"]);
+    const params = this.buildParams(args, ["query", "size", "orderby", "cursor"]);
     const response = await this.axiosClient.get("/v1/firmware_updates/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getFirmwareUpdate(args) {
-    const response = await this.axiosClient.get(`/v1/firmware_updates/inventory/${args.update_id}`);
+    const response = await this.axiosClient.get(`/v1/firmware_updates/inventory/${args.update_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
@@ -982,41 +874,41 @@ class DigiRemoteManagerServer {
   }
 
   async getCellularUtilizationReport(args) {
-    const params = this.buildParams(args, ["start_time", "end_time", "query"]);
+    const params = this.buildParams(args, ["start_time", "end_time", "query", "group", "child_groups", "groupby"]);
     const response = await this.axiosClient.get("/v1/reports/cellular_utilization", { params });
     return this.formatResponse(response.data);
   }
 
   async getDeviceAvailabilityReport(args) {
-    const params = this.buildParams(args, ["start_time", "end_time", "query"]);
+    const params = this.buildParams(args, ["start_time", "end_time", "query", "group", "child_groups", "size"]);
     const response = await this.axiosClient.get("/v1/reports/device_availability", { params });
     return this.formatResponse(response.data);
   }
 
-  async listTemplates(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+  async listConfigs(args) {
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/configs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
-  async getTemplate(args) {
-    const response = await this.axiosClient.get(`/v1/configs/inventory/${args.config_id}`);
+  async getConfig(args) {
+    const response = await this.axiosClient.get(`/v1/configs/inventory/${args.config_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listHealthConfigs(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/health_configs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getHealthConfig(args) {
-    const response = await this.axiosClient.get(`/v1/health_configs/inventory/${args.health_config_id}`);
+    const response = await this.axiosClient.get(`/v1/health_configs/inventory/${args.health_config_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listEvents(args) {
-    const params = this.buildParams(args, ["query", "start_time", "end_time", "size"]);
+    const params = this.buildParams(args, ["query", "start_time", "end_time", "size", "cursor", "event_type", "device_id"]);
     const response = await this.axiosClient.get("/v1/events/inventory", { params });
     return this.formatResponse(response.data);
   }
@@ -1028,13 +920,13 @@ class DigiRemoteManagerServer {
   }
 
   async listUsers(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/users/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getUser(args) {
-    const response = await this.axiosClient.get(`/v1/users/inventory/${args.user_id}`);
+    const response = await this.axiosClient.get(`/v1/users/inventory/${args.user_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
@@ -1045,18 +937,18 @@ class DigiRemoteManagerServer {
   }
 
   async getApiKey(args) {
-    const response = await this.axiosClient.get(`/v1/api_keys/inventory/${args.api_key_id}`);
+    const response = await this.axiosClient.get(`/v1/api_keys/inventory/${args.api_key_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
   async listFiles(args) {
-    const params = this.buildParams(args, ["query", "orderby"]);
+    const params = this.buildParams(args, ["query", "orderby", "device_id", "size", "cursor"]);
     const response = await this.axiosClient.get("/v1/files/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getFile(args) {
-    const response = await this.axiosClient.get(`/v1/files/inventory/${args.file_id}`);
+    const response = await this.axiosClient.get(`/v1/files/inventory/${args.file_id || args.id}`);
     return this.formatResponse(response.data);
   }
 
@@ -1079,6 +971,10 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
+  // ============================================
+  // TRANSPORT LAYER
+  // ============================================
+
   async run() {
     const transportType = process.env.MCP_TRANSPORT || 'stdio';
     
@@ -1088,7 +984,8 @@ class DigiRemoteManagerServer {
     } else {
       const transport = new StdioServerTransport();
       await this.server.connect(transport);
-      console.error("Digi Remote Manager MCP server running on stdio");
+      console.error("✓ Digi Remote Manager MCP server running on stdio");
+      console.error(`✓ Dynamic tools with ${this.endpointCatalog.length} endpoints`);
     }
   }
 
@@ -1138,20 +1035,44 @@ class DigiRemoteManagerServer {
       res.json({ 
         status: 'ok', 
         server: 'digi-remote-manager-mcp',
-        version: '2.0.0',
+        version: '3.0.0',
         transport: 'streamable-http',
         endpoint: '/mcp',
-        tools: 51
+        tools: 3,
+        endpoints: this.endpointCatalog.length,
+        openapi_spec: OPENAPI_SPEC_PATH
+      });
+    });
+    
+    // Debug endpoint to see all available endpoints
+    app.get('/endpoints', (req, res) => {
+      res.json({
+        count: this.endpointCatalog.length,
+        endpoints: this.endpointCatalog.map(e => ({
+          operation_id: e.operation_id,
+          category: e.category,
+          description: e.description,
+          path: e.path,
+          method: e.httpMethod,
+          required_params: e.params.filter(p => p.required).map(p => p.name),
+          optional_params: e.params.filter(p => !p.required).map(p => p.name)
+        }))
       });
     });
     
     app.listen(port, () => {
-      console.error(`Digi Remote Manager MCP server running on HTTP port ${port}`);
-      console.error(`Streamable HTTP endpoint: http://localhost:${port}/mcp`);
-      console.error(`Health check: http://localhost:${port}/health`);
+      console.error(`✓ Digi Remote Manager MCP server running on HTTP port ${port}`);
+      console.error(`✓ Streamable HTTP endpoint: http://localhost:${port}/mcp`);
+      console.error(`✓ Health check: http://localhost:${port}/health`);
+      console.error(`✓ Endpoints list: http://localhost:${port}/endpoints`);
+      console.error(`✓ Dynamic tools with ${this.endpointCatalog.length} endpoints`);
     });
   }
 }
+
+// ============================================
+// START SERVER
+// ============================================
 
 const server = new DigiRemoteManagerServer();
 server.run().catch(console.error);
