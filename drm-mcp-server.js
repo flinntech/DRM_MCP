@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Digi Remote Manager MCP Server - Enhanced Version
- * Full API coverage with 45+ tools
+ * Digi Remote Manager MCP Server - Enhanced Version with SCI Support
+ * Full API coverage with 60+ tools including SCI/RCI operations
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -681,6 +681,136 @@ class DigiRemoteManagerServer {
             },
           },
         },
+
+        // ============================================
+        // SCI - SERVER COMMAND INTERFACE OPERATIONS
+        // ============================================
+        
+        // SCI - DEVICE QUERY OPERATIONS
+        {
+          name: "sci_query_device_state",
+          description: "Query device state via SCI/RCI (device_stats, interface_info, etc.). Can query from device or cached data.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              device_id: { type: "string", description: "Device ID" },
+              state_group: { type: "string", description: "State group to query (e.g., 'device_stats', 'interface_info', or empty for all)" },
+              use_cache: { type: "boolean", description: "Query cached data instead of live device (faster)", default: true },
+              timeout: { type: "number", description: "Request timeout in seconds", default: 30 },
+            },
+            required: ["device_id"],
+          },
+        },
+        {
+          name: "sci_query_device_settings",
+          description: "Query device configuration settings via SCI/RCI. Returns current device configuration.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              device_id: { type: "string", description: "Device ID" },
+              settings_group: { type: "string", description: "Settings group to query (or empty for all)" },
+              use_cache: { type: "boolean", description: "Query cached settings", default: true },
+              source: { type: "string", description: "Source: 'current' (default), 'stored', or 'defaults'", default: "current" },
+            },
+            required: ["device_id"],
+          },
+        },
+        {
+          name: "sci_query_descriptor",
+          description: "Get RCI descriptor for device - shows available commands, settings, and state groups for that device type",
+          inputSchema: {
+            type: "object",
+            properties: {
+              device_id: { type: "string", description: "Device ID" },
+              element: { type: "string", description: "Specific element to describe (or empty for root)" },
+            },
+            required: ["device_id"],
+          },
+        },
+        {
+          name: "sci_query_multiple_devices",
+          description: "Query state/settings from multiple devices at once (by device IDs, tags, or group)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              target_type: { type: "string", description: "Target type: 'device_ids', 'tag', 'group', or 'all'", default: "device_ids" },
+              target_value: { type: "string", description: "Device IDs (comma-separated), tag name, or group path" },
+              query_type: { type: "string", description: "Query type: 'state' or 'setting'", default: "state" },
+              query_content: { type: "string", description: "What to query (e.g., 'device_stats')" },
+              use_cache: { type: "boolean", description: "Use cached data", default: true },
+              synchronous: { type: "boolean", description: "Wait for completion (false = async job)", default: true },
+            },
+            required: ["target_value", "query_type"],
+          },
+        },
+
+        // SCI - FILE SYSTEM OPERATIONS
+        {
+          name: "sci_list_device_files",
+          description: "List files on device file system via SCI",
+          inputSchema: {
+            type: "object",
+            properties: {
+              device_id: { type: "string", description: "Device ID" },
+              path: { type: "string", description: "Directory path to list", default: "/" },
+              hash: { type: "string", description: "Include file hashes: 'none', 'any', 'md5', 'sha3-512'", default: "none" },
+            },
+            required: ["device_id"],
+          },
+        },
+        {
+          name: "sci_get_device_file",
+          description: "Get file contents from device via SCI",
+          inputSchema: {
+            type: "object",
+            properties: {
+              device_id: { type: "string", description: "Device ID" },
+              path: { type: "string", description: "File path" },
+              offset: { type: "number", description: "Byte offset to start reading", default: 0 },
+              length: { type: "number", description: "Number of bytes to read (0 = all)", default: 0 },
+            },
+            required: ["device_id", "path"],
+          },
+        },
+
+        // SCI - FIRMWARE QUERY
+        {
+          name: "sci_query_firmware_targets",
+          description: "Query available firmware targets on device (what firmware can be updated)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              device_id: { type: "string", description: "Device ID" },
+            },
+            required: ["device_id"],
+          },
+        },
+
+        // SCI - JOB STATUS
+        {
+          name: "sci_get_job_status",
+          description: "Get status of asynchronous SCI job by job ID",
+          inputSchema: {
+            type: "object",
+            properties: {
+              job_id: { type: "string", description: "SCI Job ID returned from async operation" },
+            },
+            required: ["job_id"],
+          },
+        },
+
+        // SCI - DATA SERVICE (Read from DRM storage)
+        {
+          name: "sci_get_data_service_file",
+          description: "Get file from Remote Manager Data Services storage",
+          inputSchema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string", description: "Path in Data Services (e.g., 'db://path/to/file.xml')" },
+            },
+            required: ["file_path"],
+          },
+        },
       ],
     }));
 
@@ -689,6 +819,7 @@ class DigiRemoteManagerServer {
         const { name, arguments: args } = request.params;
 
         switch (name) {
+          // Original tools
           case "list_devices": return await this.listDevices(args);
           case "list_devices_bulk": return await this.listDevicesBulk(args);
           case "get_device": return await this.getDevice(args);
@@ -726,21 +857,31 @@ class DigiRemoteManagerServer {
           case "get_device_report": return await this.getDeviceReport(args);
           case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
           case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
-          case "list_templates": return await this.listConfigs(args);
-          case "get_template": return await this.getConfig(args);
+          case "list_templates": return await this.listTemplates(args);
+          case "get_template": return await this.getTemplate(args);
           case "list_health_configs": return await this.listHealthConfigs(args);
           case "get_health_config": return await this.getHealthConfig(args);
           case "list_events": return await this.listEvents(args);
           case "list_events_bulk": return await this.listEventsBulk(args);
           case "list_users": return await this.listUsers(args);
           case "get_user": return await this.getUser(args);
-          case "list_api_keys": return await this.listApiKeys(args);
-          case "get_api_key": return await this.getApiKey(args);
           case "list_files": return await this.listFiles(args);
           case "get_file": return await this.getFile(args);
           case "get_account_info": return await this.getAccountInfo(args);
           case "get_account_security": return await this.getAccountSecurity(args);
           case "get_api_info": return await this.getApiInfo(args);
+          
+          // SCI tools
+          case "sci_query_device_state": return await this.sciQueryDeviceState(args);
+          case "sci_query_device_settings": return await this.sciQueryDeviceSettings(args);
+          case "sci_query_descriptor": return await this.sciQueryDescriptor(args);
+          case "sci_query_multiple_devices": return await this.sciQueryMultipleDevices(args);
+          case "sci_list_device_files": return await this.sciListDeviceFiles(args);
+          case "sci_get_device_file": return await this.sciGetDeviceFile(args);
+          case "sci_query_firmware_targets": return await this.sciQueryFirmwareTargets(args);
+          case "sci_get_job_status": return await this.sciGetJobStatus(args);
+          case "sci_get_data_service_file": return await this.sciGetDataServiceFile(args);
+          
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -771,6 +912,10 @@ class DigiRemoteManagerServer {
     });
   }
 
+  // ============================================
+  // HELPER METHODS
+  // ============================================
+
   buildParams(args, allowed) {
     const params = {};
     for (const p of allowed) {
@@ -782,6 +927,61 @@ class DigiRemoteManagerServer {
   formatResponse(data) {
     return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
   }
+
+  // ============================================
+  // SCI HELPER METHODS
+  // ============================================
+
+  buildSciRequest(operation, targets, payload) {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<sci_request version="1.0">
+  <${operation}>
+    <targets>
+      ${targets}
+    </targets>
+    ${payload}
+  </${operation}>
+</sci_request>`;
+  }
+
+  buildRciRequest(command, content = '') {
+    return `<rci_request version="1.1">
+  <${command}>${content}</${command}>
+</rci_request>`;
+  }
+
+  buildDeviceTarget(deviceId) {
+    return `<device id="${deviceId}"/>`;
+  }
+
+  buildMultipleTargets(targetType, targetValue) {
+    switch (targetType) {
+      case 'device_ids':
+        return targetValue.split(',').map(id => `<device id="${id.trim()}"/>`).join('\n      ');
+      case 'tag':
+        return `<device tag="${targetValue}"/>`;
+      case 'group':
+        return `<group path="${targetValue}"/>`;
+      case 'all':
+        return `<device id="all"/>`;
+      default:
+        throw new Error(`Invalid target type: ${targetType}`);
+    }
+  }
+
+  async sendSciRequest(xmlRequest) {
+    const response = await this.axiosClient.post('/sci', xmlRequest, {
+      headers: {
+        'Content-Type': 'text/xml',
+        'Accept': 'text/xml',
+      },
+    });
+    return response.data;
+  }
+
+  // ============================================
+  // ORIGINAL API METHODS
+  // ============================================
 
   async listDevices(args) {
     const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
@@ -1038,17 +1238,6 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  async listApiKeys(args) {
-    const params = this.buildParams(args, ["orderby"]);
-    const response = await this.axiosClient.get("/v1/api_keys/inventory", { params });
-    return this.formatResponse(response.data);
-  }
-
-  async getApiKey(args) {
-    const response = await this.axiosClient.get(`/v1/api_keys/inventory/${args.api_key_id}`);
-    return this.formatResponse(response.data);
-  }
-
   async listFiles(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
     const response = await this.axiosClient.get("/v1/files/inventory", { params });
@@ -1078,6 +1267,180 @@ class DigiRemoteManagerServer {
     const response = await this.axiosClient.get(url);
     return this.formatResponse(response.data);
   }
+
+  // ============================================
+  // SCI IMPLEMENTATION METHODS
+  // ============================================
+
+  async sciQueryDeviceState(args) {
+    const { device_id, state_group = '', use_cache = true, timeout = 30 } = args;
+    
+    const stateContent = state_group ? `<${state_group}/>` : '';
+    const rciRequest = this.buildRciRequest('query_state', stateContent);
+    const cacheAttr = use_cache ? ' cache="true"' : '';
+    
+    const sciRequest = this.buildSciRequest(
+      'send_message',
+      this.buildDeviceTarget(device_id),
+      `<timeout>${timeout}</timeout>${cacheAttr ? `<cache>${use_cache}</cache>` : ''}
+    ${rciRequest}`
+    );
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciQueryDeviceSettings(args) {
+    const { device_id, settings_group = '', use_cache = true, source = 'current' } = args;
+    
+    const settingsContent = settings_group ? `<${settings_group}/>` : '';
+    const sourceAttr = source !== 'current' ? ` source="${source}"` : '';
+    const rciRequest = `<rci_request version="1.1">
+  <query_setting${sourceAttr}>${settingsContent}</query_setting>
+</rci_request>`;
+    
+    const cacheAttr = use_cache ? ' cache="true"' : '';
+    const sciRequest = this.buildSciRequest(
+      'send_message',
+      this.buildDeviceTarget(device_id),
+      `${cacheAttr ? `<cache>${use_cache}</cache>` : ''}
+    ${rciRequest}`
+    );
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciQueryDescriptor(args) {
+    const { device_id, element = '' } = args;
+    
+    const elementContent = element ? `<${element}/>` : '';
+    const rciRequest = this.buildRciRequest('query_descriptor', elementContent);
+    
+    const sciRequest = this.buildSciRequest(
+      'send_message',
+      this.buildDeviceTarget(device_id),
+      rciRequest
+    );
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciQueryMultipleDevices(args) {
+    const { target_type, target_value, query_type, query_content = '', use_cache = true, synchronous = true } = args;
+    
+    const command = query_type === 'state' ? 'query_state' : 'query_setting';
+    const content = query_content ? `<${query_content}/>` : '';
+    const rciRequest = this.buildRciRequest(command, content);
+    
+    const syncAttr = !synchronous ? ' synchronous="false"' : '';
+    const sciRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<sci_request version="1.0">
+  <send_message${syncAttr}>
+    <targets>
+      ${this.buildMultipleTargets(target_type, target_value)}
+    </targets>
+    ${use_cache ? '<cache>true</cache>' : ''}
+    ${rciRequest}
+  </send_message>
+</sci_request>`;
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciListDeviceFiles(args) {
+    const { device_id, path = '/', hash = 'none' } = args;
+    
+    const sciRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<sci_request version="1.0">
+  <file_system>
+    <targets>
+      ${this.buildDeviceTarget(device_id)}
+    </targets>
+    <commands>
+      <ls path="${path}" hash="${hash}"/>
+    </commands>
+  </file_system>
+</sci_request>`;
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciGetDeviceFile(args) {
+    const { device_id, path, offset = 0, length = 0 } = args;
+    
+    const offsetAttr = offset > 0 ? ` offset="${offset}"` : '';
+    const lengthAttr = length > 0 ? ` length="${length}"` : '';
+    
+    const sciRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<sci_request version="1.0">
+  <file_system>
+    <targets>
+      ${this.buildDeviceTarget(device_id)}
+    </targets>
+    <commands>
+      <get path="${path}"${offsetAttr}${lengthAttr}/>
+    </commands>
+  </file_system>
+</sci_request>`;
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciQueryFirmwareTargets(args) {
+    const { device_id } = args;
+    
+    const sciRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<sci_request version="1.0">
+  <query_firmware_targets>
+    <targets>
+      ${this.buildDeviceTarget(device_id)}
+    </targets>
+  </query_firmware_targets>
+</sci_request>`;
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  async sciGetJobStatus(args) {
+    const { job_id } = args;
+    
+    // For SCI async jobs, poll via HTTP GET
+    const response = await this.axiosClient.get(`/sci/${job_id}`, {
+      headers: { 'Accept': 'text/xml' }
+    });
+    return { content: [{ type: "text", text: response.data }] };
+  }
+
+  async sciGetDataServiceFile(args) {
+    const { file_path } = args;
+    
+    const sciRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<sci_request version="1.0">
+  <data_service>
+    <targets>
+      <device id="00000000-00000000-00000000-00000000"/>
+    </targets>
+    <requests>
+      <device_request target_name="file_system">
+        <get_file path="${file_path}"/>
+      </device_request>
+    </requests>
+  </data_service>
+</sci_request>`;
+    
+    const response = await this.sendSciRequest(sciRequest);
+    return { content: [{ type: "text", text: response }] };
+  }
+
+  // ============================================
+  // SERVER STARTUP
+  // ============================================
 
   async run() {
     const transportType = process.env.MCP_TRANSPORT || 'stdio';
@@ -1141,7 +1504,7 @@ class DigiRemoteManagerServer {
         version: '2.0.0',
         transport: 'streamable-http',
         endpoint: '/mcp',
-        tools: 51
+        tools: 60
       });
     });
     
