@@ -1,0 +1,2194 @@
+openapi: 3.0.3
+info:
+  title: Digi Remote Manager API (Read-Only)
+  version: 1.0.0
+  description: |
+    Read-only access to the Digi Remote Manager (DRM) REST API for AI agents.
+    This specification includes only GET operations to retrieve information about devices,
+    alerts, groups, data streams, jobs, reports, and other resources without making any changes.
+    
+    ## Authentication
+    All API requests require authentication using an API key in the Authorization header:
+    `Authorization: Bearer YOUR_API_KEY`
+    
+    ## Base URL
+    `https://remotemanager.digi.com/ws`
+    
+    ## Use Cases for AI Agents
+    - Monitor device health and connectivity status
+    - Analyze device metrics and telemetry data
+    - Review alert configurations and triggered alerts
+    - Generate reports on device performance
+    - Troubleshoot connectivity issues
+    - Analyze historical data trends
+    
+  contact:
+    name: Digi International Support
+    url: https://support.digi.com
+  
+servers:
+  - url: https://remotemanager.digi.com/ws
+    description: Production server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key authentication using Bearer token
+  
+  parameters:
+    deviceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: System-generated device identifier (UUID format)
+      example: "00000000-00000000-00409DFF-FF123456"
+    
+    groupPath:
+      name: group
+      in: query
+      schema:
+        type: string
+      description: Group path to filter devices
+      example: "/Production/Gateway"
+    
+    childGroups:
+      name: child_groups
+      in: query
+      schema:
+        type: boolean
+        default: false
+      description: Include devices from child groups
+    
+    cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+      description: Pagination cursor from previous response
+    
+    size:
+      name: size
+      in: query
+      schema:
+        type: integer
+        default: 1000
+        maximum: 1000
+      description: Number of items to return per page
+    
+    query:
+      name: query
+      in: query
+      schema:
+        type: string
+      description: |
+        Query string for filtering results. Supports operators: =, !=, <, <=, >, >=, startsWith, endsWith, contains
+        Examples:
+        - "connection_status = 'connected'"
+        - "signal_strength > 50"
+        - "last_update > -24h"
+        - "group startsWith '/Production'"
+        - "tags = 'critical'"
+      example: "connection_status = 'connected' and signal_strength > 50"
+    
+    tag:
+      name: tag
+      in: query
+      schema:
+        type: string
+      description: Filter devices by tag
+    
+    deviceType:
+      name: type
+      in: query
+      schema:
+        type: string
+      description: Filter devices by type
+    
+    startTime:
+      name: start_time
+      in: query
+      schema:
+        type: string
+        format: date-time
+      description: Start time for data range (ISO 8601 format)
+      example: "2025-10-01T00:00:00Z"
+    
+    endTime:
+      name: end_time
+      in: query
+      schema:
+        type: string
+        format: date-time
+      description: End time for data range (ISO 8601 format)
+      example: "2025-10-16T23:59:59Z"
+
+  schemas:
+    Device:
+      type: object
+      description: Device object representing a Digi IoT device
+      properties:
+        id:
+          type: string
+          description: System-generated device identifier
+          example: "00000000-00000000-00409DFF-FF123456"
+        name:
+          type: string
+          description: Device name
+          example: "Gateway-Building-A"
+        description:
+          type: string
+          description: Description of the device
+        type:
+          type: string
+          description: Device type identifier
+          example: "WR44v2"
+        connection_status:
+          type: string
+          enum: [connected, disconnected]
+          description: Current connection status
+        health_status:
+          type: string
+          enum: [good, warning, error, unknown]
+          description: Overall health status of the device
+        ip:
+          type: string
+          description: Local IP address of the device
+          example: "192.168.1.100"
+        public_ip:
+          type: string
+          description: Public IP address of the device
+          example: "203.0.113.42"
+        mac:
+          type: string
+          description: MAC address of the device
+          example: "00:40:9D:12:34:56"
+        serial_number:
+          type: string
+          description: Serial number of the device
+        firmware_version:
+          type: string
+          description: Current firmware version
+          example: "5.20.15.0"
+        firmware_status:
+          type: string
+          enum: [not_identified, current, available, in_progress, failed, lowered_feature_set]
+          description: Firmware update status
+        group:
+          type: string
+          description: Full group path
+          example: "/Production/Gateway/Building-A"
+        tags:
+          type: array
+          items:
+            type: string
+          description: Tags associated with the device
+          example: ["critical", "production"]
+        last_connect:
+          type: string
+          format: date-time
+          description: Last connection time (ISO 8601)
+        last_disconnect:
+          type: string
+          format: date-time
+          description: Last disconnection time (ISO 8601)
+        last_disconnect_reason:
+          type: string
+          description: Reason for last disconnection
+        last_update:
+          type: string
+          format: date-time
+          description: Last update time (ISO 8601)
+        carrier:
+          type: string
+          description: Primary cellular carrier
+        carrier2:
+          type: string
+          description: Secondary cellular carrier
+        network:
+          type: string
+          description: Primary network type (e.g., LTE, 5G)
+        network2:
+          type: string
+          description: Secondary network type
+        signal_strength:
+          type: integer
+          description: Primary signal strength in dBm
+          example: -75
+        signal_strength2:
+          type: integer
+          description: Secondary signal strength in dBm
+        signal_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Primary signal strength percentage
+        signal_percent2:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Secondary signal strength percentage
+        signal_quality:
+          type: string
+          description: Primary signal quality
+        signal_quality2:
+          type: string
+          description: Secondary signal quality
+        alerts:
+          type: integer
+          description: Total number of fired alerts
+        restricted_status:
+          type: string
+          enum: [unrestricted, restricted, disabled, untrusted]
+          description: Device restriction status
+        maintenance_mode:
+          type: string
+          enum: [on, off]
+          description: Maintenance mode status
+        channels_uri:
+          type: string
+          description: URI to device data channels
+        management_uri:
+          type: string
+          description: URI to device management data
+        metrics_uri:
+          type: string
+          description: URI to device health metrics
+        notes:
+          type: string
+          description: User notes about the device
+        contact:
+          type: string
+          description: Contact person for the device
+        location:
+          type: string
+          description: Physical location description
+        geoposition:
+          type: object
+          description: Geographic coordinates
+          properties:
+            type:
+              type: string
+              example: "Point"
+            coordinates:
+              type: array
+              items:
+                type: number
+              example: [-92.505, 44.066]
+        sku:
+          type: string
+          description: Device SKU
+        vendor_id:
+          type: integer
+          description: Vendor identifier
+        customer_id:
+          type: integer
+          description: Customer account ID
+    
+    DeviceList:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Number of items in current page
+        size:
+          type: integer
+          description: Page size
+        total:
+          type: integer
+          description: Total number of items
+        cursor:
+          type: string
+          description: Cursor for next page of results
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Device'
+    
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+          description: System-generated alert identifier
+        name:
+          type: string
+          description: Alert name
+        description:
+          type: string
+          description: Alert description
+        enabled:
+          type: boolean
+          description: Whether alert is enabled
+        alert_type:
+          type: string
+          enum:
+            - DataPoint On Change
+            - DataPoint condition
+            - Device Excessive Disconnects
+            - Device Name On Change
+            - Device Offline
+            - Dia channel data point condition match
+            - Missing DataPoint
+            - Missing DiaChannel DataPoint
+            - Missing Smart Energy DataPoint
+          description: Type of alert
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Alert priority level
+        fire_rule:
+          type: object
+          description: Conditions for when alert fires
+        reset_rule:
+          type: object
+          description: Conditions for when alert resets
+        auto_reset:
+          type: boolean
+          description: Whether alert auto-resets
+        scope:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [Device, Group, Resource, XBeeNode]
+            target:
+              type: string
+              description: Target identifier based on scope type
+        notification_configs:
+          type: array
+          items:
+            type: string
+          description: List of notification configuration IDs
+        customer_id:
+          type: integer
+          description: Customer account ID
+    
+    DataStream:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Device ID owning the stream
+        stream_id:
+          type: string
+          description: Stream identifier
+        description:
+          type: string
+          description: Stream description
+        data_type:
+          type: string
+          enum: [INTEGER, LONG, FLOAT, DOUBLE, STRING, JSON]
+        units:
+          type: string
+          description: Units of measurement
+        history_uri:
+          type: string
+          description: URI to stream history
+        customer_id:
+          type: integer
+          description: Customer account ID
+    
+    DataPoint:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Data point identifier
+        stream_id:
+          type: string
+          description: Stream identifier
+        timestamp:
+          type: string
+          format: date-time
+          description: Data point timestamp (ISO 8601)
+        server_timestamp:
+          type: string
+          format: date-time
+          description: Server receipt timestamp
+        value:
+          oneOf:
+            - type: number
+            - type: string
+            - type: object
+          description: Data point value
+        quality:
+          type: integer
+          description: Quality indicator (0-100)
+    
+    Channel:
+      type: object
+      description: Device data channel representing sensor or telemetry data
+      properties:
+        id:
+          type: string
+          description: Device ID
+        name:
+          type: string
+          description: Channel name
+        value:
+          oneOf:
+            - type: number
+            - type: string
+          description: Current channel value
+        units:
+          type: string
+          description: Units of measurement
+        timestamp:
+          type: string
+          format: date-time
+          description: Last update timestamp
+        history_uri:
+          type: string
+          description: URI to historical data
+        customer_id:
+          type: integer
+    
+    Metric:
+      type: object
+      description: Device health metric
+      properties:
+        name:
+          type: string
+          description: Metric name
+        value:
+          type: number
+          description: Metric value
+        timestamp:
+          type: string
+          format: date-time
+          description: Measurement timestamp
+        units:
+          type: string
+          description: Units of measurement
+    
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Group identifier
+        name:
+          type: string
+          description: Group name
+        path:
+          type: string
+          description: Full group path
+          example: "/Production/Gateway"
+        description:
+          type: string
+        parent_id:
+          type: string
+          description: Parent group identifier
+        customer_id:
+          type: integer
+    
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Job identifier
+        type:
+          type: string
+          description: Job type
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        created_date:
+          type: string
+          format: date-time
+        completion_date:
+          type: string
+          format: date-time
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        description:
+          type: string
+        customer_id:
+          type: integer
+    
+    Firmware:
+      type: object
+      properties:
+        vendor_id:
+          type: integer
+          description: Vendor identifier
+        type:
+          type: string
+          description: Device type
+        firmware_version:
+          type: string
+          description: Firmware version
+        location:
+          type: string
+          description: Download URL for firmware
+        file_size:
+          type: integer
+          description: File size in bytes
+        production:
+          type: boolean
+          description: Whether this is production firmware
+        deprecated:
+          type: boolean
+          description: Whether firmware is deprecated
+        filename:
+          type: string
+        information_link:
+          type: string
+          description: Link to release notes or documentation
+        security_related:
+          type: string
+          enum: [not-identified, security-related, not-security-related]
+        sha_512:
+          type: string
+          description: SHA-512 checksum
+    
+    Config:
+      type: object
+      description: Device configuration
+      properties:
+        id:
+          type: string
+          description: Configuration identifier
+        name:
+          type: string
+        description:
+          type: string
+        customer_id:
+          type: integer
+    
+    Automation:
+      type: object
+      description: Automation workflow
+      properties:
+        id:
+          type: integer
+          description: Automation identifier
+        name:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        customer_id:
+          type: integer
+    
+    HealthConfig:
+      type: object
+      description: Health monitoring configuration
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        enabled:
+          type: boolean
+        customer_id:
+          type: integer
+    
+    Event:
+      type: object
+      description: System event
+      properties:
+        id:
+          type: string
+        event_type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        device_id:
+          type: string
+        description:
+          type: string
+    
+    User:
+      type: object
+      description: User account
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        customer_id:
+          type: integer
+    
+    NetworkInterface:
+      type: object
+      description: Device network interface
+      properties:
+        name:
+          type: string
+        ip_address:
+          type: string
+        mac_address:
+          type: string
+        status:
+          type: string
+    
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        error_status:
+          type: integer
+          description: HTTP status code
+        error_context:
+          type: object
+          description: Additional error context
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1:
+    get:
+      operationId: listAPIs
+      summary: List all available v1 APIs
+      description: Returns a table of contents of all major API categories available to your account. Use this to discover what APIs you have access to.
+      tags:
+        - Meta
+      responses:
+        '200':
+          description: List of available APIs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  list:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+
+  # ============================================
+  # DEVICES
+  # ============================================
+  
+  /v1/devices/inventory:
+    get:
+      operationId: listDevices
+      summary: List devices
+      description: |
+        Retrieve a list of devices in the account. Supports filtering by group, tags, type, and custom queries.
+        Use this to get an overview of your device inventory with their connection status and health metrics.
+        
+        Common use cases:
+        - Find all disconnected devices
+        - List devices with low signal strength
+        - Get devices in a specific location/group
+        - Monitor device health status
+      tags:
+        - Devices
+      parameters:
+        - $ref: '#/components/parameters/groupPath'
+        - $ref: '#/components/parameters/childGroups'
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/query'
+        - $ref: '#/components/parameters/tag'
+        - $ref: '#/components/parameters/deviceType'
+        - name: orderby
+          in: query
+          schema:
+            type: string
+          description: Field to sort by (e.g., last_connect, name, signal_strength)
+          example: "last_connect"
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        '200':
+          description: List of devices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceList'
+        '401':
+          description: Unauthorized - invalid or missing API key
+
+  /v1/devices/inventory/{id}:
+    get:
+      operationId: getDevice
+      summary: Get device by ID
+      description: |
+        Retrieve detailed information about a specific device including its current status,
+        signal strength, firmware version, and configuration. Use this to troubleshoot device issues
+        or check device health.
+        
+        Returns comprehensive device information including:
+        - Connection status and last connect/disconnect times
+        - Signal strength and carrier information
+        - Firmware version and update status
+        - Health metrics and alert counts
+        - Device location and contact info
+      tags:
+        - Devices
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+      responses:
+        '200':
+          description: Device details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '404':
+          description: Device not found
+
+  /v1/devices/bulk:
+    get:
+      operationId: listDevicesBulk
+      summary: List devices in CSV format
+      description: |
+        Retrieve device list in CSV format for bulk operations or data export.
+        Useful for generating reports or importing into external systems.
+        Supports same filtering options as /inventory endpoint.
+      tags:
+        - Devices
+      parameters:
+        - $ref: '#/components/parameters/groupPath'
+        - $ref: '#/components/parameters/childGroups'
+        - $ref: '#/components/parameters/query'
+        - $ref: '#/components/parameters/tag'
+        - $ref: '#/components/parameters/deviceType'
+        - name: fields
+          in: query
+          schema:
+            type: string
+          description: Comma-separated list of fields to include
+          example: "name,connection_status,signal_strength,last_connect"
+        - name: orderby
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV data
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /v1/devices/types:
+    get:
+      operationId: listDeviceTypes
+      summary: List device types
+      description: Get a list of all supported device types in the system (e.g., WR44v2, TX64, EX50)
+      tags:
+        - Devices
+      responses:
+        '200':
+          description: List of device types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: ["WR44v2", "TX64", "EX50", "IX20"]
+
+  # ============================================
+  # DEVICE DATA - CHANNELS
+  # ============================================
+
+  /v1/devices/channels/{id}:
+    get:
+      operationId: listDeviceChannels
+      summary: List device data channels
+      description: |
+        Get all data channels (data streams) for a device. Data channels represent sensor readings,
+        telemetry, or other time-series data from the device.
+        
+        Use this to:
+        - See what data the device is reporting
+        - Monitor sensor values
+        - Access telemetry data
+      tags:
+        - Device Data
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+      responses:
+        '200':
+          description: List of data channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Channel'
+
+  /v1/devices/channels/{id}/{name}:
+    get:
+      operationId: getDeviceChannel
+      summary: Get specific device data channel
+      description: |
+        Retrieve current value and metadata for a specific data channel.
+        Use this to check sensor readings or device telemetry.
+      tags:
+        - Device Data
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Channel name
+          example: "temperature"
+      responses:
+        '200':
+          description: Channel data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+
+  # ============================================
+  # DEVICE DATA - METRICS
+  # ============================================
+
+  /v1/devices/metrics/{id}:
+    get:
+      operationId: listDeviceMetrics
+      summary: List device health metrics
+      description: |
+        Get health metrics for a device including CPU usage, memory, disk space, and other
+        system-level indicators. Use for monitoring device health and troubleshooting.
+        
+        Common metrics include:
+        - CPU utilization
+        - Memory usage
+        - Disk space
+        - Temperature
+        - Uptime
+      tags:
+        - Device Data
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+      responses:
+        '200':
+          description: List of health metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Metric'
+
+  /v1/devices/metrics/{id}/{name}:
+    get:
+      operationId: getDeviceMetric
+      summary: Get specific device health metric
+      description: Retrieve a specific health metric for a device
+      tags:
+        - Device Data
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Metric name
+          example: "cpu_usage"
+      responses:
+        '200':
+          description: Metric data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metric'
+
+  /v1/devices/management/{id}:
+    get:
+      operationId: listDeviceManagementStreams
+      summary: List device management streams
+      description: Get management data streams for a device (configuration, state information)
+      tags:
+        - Device Data
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+      responses:
+        '200':
+          description: List of management streams
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DataStream'
+
+  /v1/devices/management/{id}/{name}:
+    get:
+      operationId: getDeviceManagementStream
+      summary: Get specific device management stream
+      description: Retrieve a specific management data stream for a device
+      tags:
+        - Device Data
+      parameters:
+        - $ref: '#/components/parameters/deviceId'
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Management stream name
+      responses:
+        '200':
+          description: Management stream data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStream'
+
+  # ============================================
+  # ALERTS
+  # ============================================
+
+  /v1/alerts/inventory:
+    get:
+      operationId: listAlerts
+      summary: List alerts
+      description: |
+        Retrieve all configured alerts (previously called alarms). Alerts monitor device conditions
+        and trigger notifications when specified criteria are met.
+        
+        Use this to:
+        - Review alert configurations
+        - See what conditions are being monitored
+        - Understand notification settings
+      tags:
+        - Alerts
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/query'
+      responses:
+        '200':
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Alert'
+
+  /v1/alerts/inventory/{id}:
+    get:
+      operationId: getAlert
+      summary: Get alert by ID
+      description: |
+        Retrieve details of a specific alert configuration including firing conditions,
+        reset conditions, and notification settings.
+      tags:
+        - Alerts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Alert identifier
+      responses:
+        '200':
+          description: Alert details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+
+  # ============================================
+  # GROUPS
+  # ============================================
+
+  /v1/groups/inventory:
+    get:
+      operationId: listGroups
+      summary: List groups
+      description: |
+        Retrieve the organizational hierarchy of device groups. Groups are used to organize
+        devices logically (e.g., by location, project, or customer).
+        
+        Use this to:
+        - Understand device organization
+        - Navigate the group hierarchy
+        - Filter devices by organizational structure
+      tags:
+        - Groups
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+
+  /v1/groups/inventory/{id}:
+    get:
+      operationId: getGroup
+      summary: Get group by ID
+      description: Retrieve details of a specific group
+      tags:
+        - Groups
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Group details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+
+  # ============================================
+  # DATA STREAMS
+  # ============================================
+
+  /v1/streams/inventory:
+    get:
+      operationId: listStreams
+      summary: List all data streams
+      description: |
+        Retrieve all time-series data streams in the account. Streams can contain sensor data,
+        telemetry, or any custom time-stamped data from devices.
+      tags:
+        - Data Streams
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of data streams
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DataStream'
+
+  /v1/streams/inventory/{device_id}/{stream_id}:
+    get:
+      operationId: getStream
+      summary: Get data stream
+      description: Retrieve metadata for a specific data stream
+      tags:
+        - Data Streams
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device identifier
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - name: rollup_interval
+          in: query
+          schema:
+            type: string
+          description: Rollup interval (e.g., 1h, 1d, 1w)
+          example: "1h"
+      responses:
+        '200':
+          description: Rollup data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  list:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        min:
+                          type: number
+                        max:
+                          type: number
+                        avg:
+                          type: number
+                        count:
+                          type: integer
+
+  # ============================================
+  # JOBS
+  # ============================================
+
+  /v1/jobs/inventory:
+    get:
+      operationId: listJobs
+      summary: List jobs
+      description: |
+        Retrieve all jobs in the account. Jobs represent long-running operations such as
+        firmware updates, configuration changes, or bulk operations on devices.
+        
+        Use this to:
+        - Monitor job progress
+        - Check job status and completion
+        - Review job history
+      tags:
+        - Jobs
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+          description: Filter by job status
+        - $ref: '#/components/parameters/query'
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+
+  /v1/jobs/inventory/{id}:
+    get:
+      operationId: getJob
+      summary: Get job status
+      description: |
+        Check the status and progress of a specific job. Use this to monitor long-running
+        operations and handle completion or failure.
+        
+        Returns detailed job information including progress percentage, start/completion times,
+        and any error messages.
+      tags:
+        - Jobs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Job identifier
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  # ============================================
+  # REPORTS
+  # ============================================
+
+  /v1/reports:
+    get:
+      operationId: listReportTypes
+      summary: List available report types
+      description: |
+        Get a list of all available report types in Remote Manager including device availability,
+        cellular utilization, health status, and custom reports.
+      tags:
+        - Reports
+      responses:
+        '200':
+          description: List of report types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  list:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        description:
+                          type: string
+
+  /v1/reports/device_availability:
+    get:
+      operationId: getDeviceAvailabilityReport
+      summary: Get device availability report
+      description: |
+        Generate a report showing device connection uptime and availability statistics.
+        Use this to analyze device connectivity reliability and identify problem devices.
+      tags:
+        - Reports
+      parameters:
+        - $ref: '#/components/parameters/groupPath'
+        - $ref: '#/components/parameters/childGroups'
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - $ref: '#/components/parameters/query'
+        - $ref: '#/components/parameters/size'
+      responses:
+        '200':
+          description: Device availability report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        device_id:
+                          type: string
+                        name:
+                          type: string
+                        availability_percent:
+                          type: number
+                        uptime_seconds:
+                          type: integer
+                        downtime_seconds:
+                          type: integer
+
+  /v1/reports/cellular_utilization:
+    get:
+      operationId: getCellularUtilizationReport
+      summary: Get cellular utilization report
+      description: |
+        Generate a report showing cellular data usage by device, including bytes sent/received
+        and total usage. Use this to monitor data consumption and identify high-usage devices.
+      tags:
+        - Reports
+      parameters:
+        - $ref: '#/components/parameters/groupPath'
+        - $ref: '#/components/parameters/childGroups'
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - $ref: '#/components/parameters/query'
+        - name: groupby
+          in: query
+          schema:
+            type: string
+            enum: [none, device, carrier, provider]
+          description: Group results by specified field
+      responses:
+        '200':
+          description: Cellular utilization report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        device_id:
+                          type: string
+                        name:
+                          type: string
+                        carrier:
+                          type: string
+                        bytes_sent:
+                          type: integer
+                        bytes_received:
+                          type: integer
+                        total:
+                          type: integer
+
+  /v1/reports/cellular_utilization/summary:
+    get:
+      operationId: getCellularUtilizationSummary
+      summary: Get cellular utilization summary
+      description: |
+        Get summarized cellular data usage aggregated across devices or grouped by 
+        carrier, provider, device type, or firmware version.
+      tags:
+        - Reports
+      parameters:
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - name: groupby
+          in: query
+          schema:
+            type: string
+            enum: [modem, sim, carrier, provider, device_type, firmware_version, group]
+          description: Field to group summary by
+      responses:
+        '200':
+          description: Cellular utilization summary
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================
+  # FIRMWARE
+  # ============================================
+
+  /v1/firmware/inventory:
+    get:
+      operationId: listFirmware
+      summary: List available firmware
+      description: |
+        Retrieve a list of available firmware versions for devices. Includes both Digi-provided
+        and custom firmware. Use this to see what firmware versions are available for updates.
+      tags:
+        - Firmware
+      parameters:
+        - name: vendor_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by vendor ID
+        - name: device_type
+          in: query
+          schema:
+            type: string
+          description: Filter by device type
+        - name: include_non_production
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Include non-production firmware versions
+      responses:
+        '200':
+          description: List of firmware versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Firmware'
+
+  /v1/firmware/inventory/{vendor_id}/{device_type}:
+    get:
+      operationId: getFirmwareForDevice
+      summary: Get firmware for device type
+      description: |
+        Get all available firmware versions for a specific vendor and device type combination.
+      tags:
+        - Firmware
+      parameters:
+        - name: vendor_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: device_type
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Firmware versions for device type
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Firmware'
+
+  /v1/firmware_updates/inventory:
+    get:
+      operationId: listFirmwareUpdates
+      summary: List firmware updates
+      description: |
+        Get a list of firmware update jobs/operations. Use this to monitor firmware
+        update progress across your device fleet.
+      tags:
+        - Firmware
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of firmware updates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        status:
+                          type: string
+                        progress:
+                          type: integer
+                        device_count:
+                          type: integer
+
+  /v1/firmware_updates/inventory/{id}:
+    get:
+      operationId: getFirmwareUpdateProgress
+      summary: Get firmware update progress
+      description: |
+        Check the progress of a specific firmware update operation including per-device
+        status and any errors encountered.
+      tags:
+        - Firmware
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Firmware update progress
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================
+  # CONFIGURATIONS
+  # ============================================
+
+  /v1/configs/inventory:
+    get:
+      operationId: listConfigurations
+      summary: List configurations
+      description: |
+        Retrieve all device configurations in the account. Configurations define device
+        settings that can be applied to one or more devices.
+      tags:
+        - Configurations
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of configurations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Config'
+
+  /v1/configs/inventory/{id}:
+    get:
+      operationId: getConfiguration
+      summary: Get configuration by ID
+      description: Retrieve details of a specific device configuration
+      tags:
+        - Configurations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Configuration details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+
+  /v1/devices/inventory/config/{configId}:
+    get:
+      operationId: listDevicesByConfig
+      summary: List devices managed by configuration
+      description: |
+        Get all devices that are currently managed by a specific configuration.
+        Use this to see which devices a configuration is applied to.
+      tags:
+        - Configurations
+      parameters:
+        - name: configId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of devices using this configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceList'
+
+  # ============================================
+  # AUTOMATIONS
+  # ============================================
+
+  /v1/automations/inventory:
+    get:
+      operationId: listAutomations
+      summary: List automations
+      description: |
+        Retrieve all automation workflows in the account. Automations are scheduled or
+        triggered workflows that perform operations on devices.
+      tags:
+        - Automations
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/query'
+      responses:
+        '200':
+          description: List of automations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Automation'
+
+  /v1/automations/inventory/{id}:
+    get:
+      operationId: getAutomation
+      summary: Get automation by ID
+      description: |
+        Retrieve details of a specific automation including its steps, schedule,
+        and execution history.
+      tags:
+        - Automations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Automation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Automation'
+
+  /v1/automations/runs/inventory:
+    get:
+      operationId: listAutomationRuns
+      summary: List automation runs
+      description: |
+        Get history of automation executions including success/failure status
+        and execution details.
+      tags:
+        - Automations
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+        - name: automation_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by automation ID
+      responses:
+        '200':
+          description: List of automation runs
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/automations/schedules/inventory:
+    get:
+      operationId: listAutomationSchedules
+      summary: List automation schedules
+      description: |
+        Get scheduled executions for automations. Use this to see when automations
+        are scheduled to run.
+      tags:
+        - Automations
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of automation schedules
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================
+  # HEALTH CONFIGS
+  # ============================================
+
+  /v1/health_configs/inventory:
+    get:
+      operationId: listHealthConfigs
+      summary: List health configurations
+      description: |
+        Retrieve health monitoring configurations that define thresholds and criteria
+        for device health status.
+      tags:
+        - Health
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of health configurations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HealthConfig'
+
+  /v1/health_configs/inventory/{id}:
+    get:
+      operationId: getHealthConfig
+      summary: Get health configuration
+      description: Retrieve details of a specific health monitoring configuration
+      tags:
+        - Health
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Health configuration details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthConfig'
+
+  # ============================================
+  # EVENTS
+  # ============================================
+
+  /v1/events/inventory:
+    get:
+      operationId: listEvents
+      summary: List system events
+      description: |
+        Retrieve system events such as device connections, disconnections, alerts fired,
+        and other significant activities. Use for audit trails and troubleshooting.
+      tags:
+        - Events
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - name: event_type
+          in: query
+          schema:
+            type: string
+          description: Filter by event type
+        - name: device_id
+          in: query
+          schema:
+            type: string
+          description: Filter by device ID
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+
+  # ============================================
+  # MONITORS
+  # ============================================
+
+  /v1/monitors/inventory:
+    get:
+      operationId: listMonitors
+      summary: List push monitors
+      description: |
+        Get configured push monitors for receiving real-time notifications about
+        device events and data changes.
+      tags:
+        - Monitors
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of monitors
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/monitors/inventory/{id}:
+    get:
+      operationId: getMonitor
+      summary: Get monitor details
+      description: Retrieve configuration and status of a specific push monitor
+      tags:
+        - Monitors
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Monitor details
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/monitors/history/{id}:
+    get:
+      operationId: getMonitorHistory
+      summary: Query polling monitor history
+      description: |
+        Retrieve historical notifications from a polling monitor. Only applicable
+        for monitors with polling transport type.
+      tags:
+        - Monitors
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Monitor notification history
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================
+  # NETWORK INTERFACES
+  # ============================================
+
+  /v1/network_interfaces/inventory:
+    get:
+      operationId: listNetworkInterfaces
+      summary: List network interfaces
+      description: |
+        Get network interface information across devices including IP addresses,
+        connection types, and status.
+      tags:
+        - Network
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of network interfaces
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NetworkInterface'
+
+  # ============================================
+  # USERS
+  # ============================================
+
+  /v1/users/inventory:
+    get:
+      operationId: listUsers
+      summary: List users
+      description: |
+        Retrieve all user accounts in the Remote Manager account. Use this to
+        see who has access to the system.
+      tags:
+        - Users
+      parameters:
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+
+  /v1/users/inventory/{id}:
+    get:
+      operationId: getUser
+      summary: Get user details
+      description: Retrieve details of a specific user account
+      tags:
+        - Users
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  # ============================================
+  # ACCOUNT & SETTINGS
+  # ============================================
+
+  /v1/account:
+    get:
+      operationId: getAccountInfo
+      summary: Get account information
+      description: |
+        Retrieve account-level information including subscription details,
+        features enabled, and account settings.
+      tags:
+        - Account
+      responses:
+        '200':
+          description: Account information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  customer_id:
+                    type: integer
+                  name:
+                    type: string
+                  subscription_type:
+                    type: string
+                  features:
+                    type: array
+                    items:
+                      type: string
+
+  /v1/settings:
+    get:
+      operationId: getSettings
+      summary: Get account settings
+      description: |
+        Retrieve account-wide settings and preferences. Use this to understand
+        the current configuration of the Remote Manager account.
+      tags:
+        - Account
+      responses:
+        '200':
+          description: Account settings
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================
+  # DEVICE LOGS
+  # ============================================
+
+  /v1/device_logs/inventory:
+    get:
+      operationId: listDeviceLogs
+      summary: List device logs
+      description: |
+        Retrieve logs from devices including system logs, application logs, and
+        diagnostic information. Use for troubleshooting device issues.
+      tags:
+        - Device Logs
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+          description: Filter by device ID
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of device logs
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ============================================
+  # FILES
+  # ============================================
+
+  /v1/files/inventory:
+    get:
+      operationId: listFiles
+      summary: List files
+      description: |
+        Retrieve files uploaded from devices or stored in Remote Manager including
+        configuration backups, diagnostic files, and custom data files.
+      tags:
+        - Files
+      parameters:
+        - name: device_id
+          in: query
+          schema:
+            type: string
+          description: Filter by device ID
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/files/inventory/{id}:
+    get:
+      operationId: getFile
+      summary: Get file metadata
+      description: Retrieve metadata for a specific file (not the file content itself)
+      tags:
+        - Files
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  size:
+                    type: integer
+                  content_type:
+                    type: string
+                  created_date:
+                    type: string
+                    format: date-time
+                  device_id:
+                    type: string
+
+  # ============================================
+  # METADATA
+  # ============================================
+
+  /v1/metadata:
+    get:
+      operationId: getMetadata
+      summary: Get API metadata
+      description: |
+        Retrieve metadata about the API itself including available fields,
+        operators, and query capabilities for different resources.
+      tags:
+        - Meta
+      responses:
+        '200':
+          description: API metadata
+          content:
+            application/json:
+              schema:
+                type: object
+
+tags:
+  - name: Meta
+    description: API discovery and metadata
+  - name: Devices
+    description: Device inventory and information
+  - name: Device Data
+    description: Device channels, metrics, and telemetry
+  - name: Alerts
+    description: Alert configurations and monitoring
+  - name: Groups
+    description: Device group organization
+  - name: Data Streams
+    description: Time-series data storage and retrieval
+  - name: Jobs
+    description: Long-running operations and tasks
+  - name: Reports
+    description: Device and usage reports
+  - name: Firmware
+    description: Firmware versions and updates
+  - name: Configurations
+    description: Device configurations
+  - name: Automations
+    description: Automation workflows and schedules
+  - name: Health
+    description: Health monitoring configurations
+  - name: Events
+    description: System events and audit logs
+  - name: Monitors
+    description: Push notification monitors
+  - name: Network
+    description: Network interface information
+  - name: Users
+    description: User account management
+  - name: Account
+    description: Account information and settings
+  - name: Device Logs
+    description: Device logging and diagnostics
+  - name: Files
+    description: File storage and management
+          description: Stream identifier
+      responses:
+        '200':
+          description: Stream metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataStream'
+
+  /v1/streams/history/{device_id}/{stream_id}:
+    get:
+      operationId: getStreamHistory
+      summary: Get stream data history
+      description: |
+        Retrieve historical time-series data for a specific stream. Use this to analyze
+        trends, generate reports, or troubleshoot issues based on past data.
+        
+        Supports time range filtering and pagination for large datasets.
+      tags:
+        - Data Streams
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Device identifier
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Stream identifier
+        - $ref: '#/components/parameters/startTime'
+        - $ref: '#/components/parameters/endTime'
+        - $ref: '#/components/parameters/size'
+        - $ref: '#/components/parameters/cursor'
+      responses:
+        '200':
+          description: Stream history data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  size:
+                    type: integer
+                  cursor:
+                    type: string
+                  next_uri:
+                    type: string
+                  list:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DataPoint'
+
+  /v1/streams/rollup/{device_id}/{stream_id}:
+    get:
+      operationId: getStreamRollup
+      summary: Get rollup data for stream
+      description: |
+        Retrieve aggregated/rollup data for a stream (min, max, avg, count over time periods).
+        Useful for generating summary reports and charts without retrieving all raw data points.
+      tags:
+        - Data Streams
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: stream_id
+          in: path
+          required: true
+          schema:
+            type: string
