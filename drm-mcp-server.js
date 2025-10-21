@@ -1668,7 +1668,7 @@ class DigiRemoteManagerServer {
   // SERVER STARTUP
   // ============================================
 
-  async run() {
+async run() {
     const transportType = process.env.MCP_TRANSPORT || 'stdio';
     
     if (transportType === 'http') {
