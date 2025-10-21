@@ -66,123 +66,195 @@ class DigiRemoteManagerServer {
   setupHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
-        // DEVICES
+        // ============================================
+        // DEVICES - Device Inventory Management
+        // ============================================
         {
           name: "list_devices",
-          description: "List all devices. Supports advanced queries like: 'connection_status=\"connected\"', 'signal_percent<50', 'group startsWith \"/Production\"'",
+          description: "List devices with advanced query filtering. Returns device inventory including connection status, health, location, signal strength, and metadata. Use query parameter for powerful filtering: Examples: 'connection_status=\"connected\"' (connected devices), 'signal_percent<50' (weak signal), 'group startsWith \"/Production\"' (by group path), 'tags=\"sensor\"' (by tag), 'last_connect>-1d' (connected in last day), 'health_status=\"error\"' (unhealthy devices). Supports pagination via cursor.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              orderby: { type: "string", description: "Sort field (e.g., 'name desc')" },
+              query: { 
+                type: "string", 
+                description: "Query filter using DRM query language. Operators: =, <>, <, <=, >, >=, startsWith, endsWith, contains, within, outside. Fields: connection_status, health_status, firmware_version, signal_percent, group, tags, type, ip, mac, last_connect, etc. Example: 'connection_status=\"disconnected\" and signal_percent<30'" 
+              },
+              size: { 
+                type: "number", 
+                description: "Number of results per page (max 1000, default 1000)" 
+              },
+              cursor: { 
+                type: "string", 
+                description: "Pagination cursor from previous response's next_cursor" 
+              },
+              orderby: { 
+                type: "string", 
+                description: "Sort field and direction, e.g., 'name desc', 'last_connect asc', 'signal_percent desc'" 
+              },
             },
           },
         },
         {
           name: "list_devices_bulk",
-          description: "Export devices to CSV format",
+          description: "Export device inventory to CSV format for data analysis, reporting, or bulk processing. Useful for generating device reports, Excel imports, or database uploads. Returns all fields by default, or specify exact fields needed.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              fields: { type: "string", description: "Comma-separated field list" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter devices using query language (same as list_devices)" 
+              },
+              fields: { 
+                type: "string", 
+                description: "Comma-separated field list (e.g., 'id,name,ip,connection_status,last_connect'). Omit for all fields." 
+              },
+              orderby: { 
+                type: "string", 
+                description: "Sort order (e.g., 'name asc')" 
+              },
             },
           },
         },
         {
           name: "get_device",
-          description: "Get device details by ID",
+          description: "Get complete details for a single device by its unique ID. Returns all device properties including connection info, location, cellular details, firmware, health status, channels, and management URIs. Device IDs are in format: '00000000-00000000-00409DFF-FF122B8E'",
           inputSchema: {
             type: "object",
             properties: {
-              device_id: { type: "string", description: "Device ID" },
+              device_id: { 
+                type: "string", 
+                description: "Device ID in UUID format (e.g., '00000000-00000000-00409DFF-FF122B8E')" 
+              },
             },
             required: ["device_id"],
           },
         },
+
+        // ============================================
+        // DATA STREAMS - Time-Series Data & Telemetry
+        // ============================================
         {
           name: "list_streams",
-          description: "List data streams. Filter by device using query like 'device_id=\"00000000-00000000-00409DFF-FF122B8E\"'",
+          description: "List data streams (time-series telemetry channels). Streams collect device sensor data like temperature, voltage, GPS coordinates, custom metrics. Each device can have multiple streams. Filter by device using query: 'device_id=\"00000000-00000000-00409DFF-FF122B8E\"'. Stream IDs format: 'DeviceID/stream_name' (e.g., '00000000-00000000-00409DFF-FF122B8E/temperature')",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter (e.g., device_id, description)" },
-              size: { type: "number", description: "Number of results" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              orderby: { type: "string", description: "Sort field" },
-              category: { type: "string", description: "Filter by category" },
+              query: { 
+                type: "string", 
+                description: "Filter streams. Common: 'device_id=\"...\"' (streams for device), 'description contains \"temp\"' (by description), 'stream_id startsWith \"00000000\"' (by device prefix)" 
+              },
+              size: { 
+                type: "number", 
+                description: "Results per page (max 1000)" 
+              },
+              cursor: { 
+                type: "string", 
+                description: "Pagination cursor" 
+              },
+              orderby: { 
+                type: "string", 
+                description: "Sort order (e.g., 'timestamp desc')" 
+              },
+              category: { 
+                type: "string", 
+                description: "Filter by stream category if categorized" 
+              },
             },
           },
         },
         {
           name: "list_streams_bulk",
-          description: "Export streams to CSV format",
+          description: "Export streams inventory to CSV format for analysis or reporting",
           inputSchema: {
             type: "object",
             properties: {
               query: { type: "string", description: "Query filter" },
-              fields: { type: "string", description: "Comma-separated fields" },
+              fields: { type: "string", description: "Comma-separated field list (e.g., 'stream_id,description,data_type,units')" },
               orderby: { type: "string", description: "Sort field" },
             },
           },
         },
         {
           name: "get_stream",
-          description: "Get details of a specific stream",
+          description: "Get details of a specific data stream including current value, data type, units, description, and history URI. Use this to understand stream metadata before querying historical data.",
           inputSchema: {
             type: "object",
             properties: {
-              stream_id: { type: "string", description: "Stream ID" },
+              stream_id: { 
+                type: "string", 
+                description: "Full stream ID: 'DeviceID/stream_name' (e.g., '00000000-00000000-00409DFF-FF122B8E/temperature')" 
+              },
             },
             required: ["stream_id"],
           },
         },
         {
           name: "get_stream_history",
-          description: "Get historical data points for a stream",
+          description: "Get historical data points from a stream - the raw time-series data. Each data point includes timestamp, value, quality indicator, and server timestamp. Use for trend analysis, graphing, anomaly detection. Time ranges support ISO format ('2024-01-01T00:00:00Z') or relative times ('-1d' = 1 day ago, '-1h' = 1 hour ago, '-30m' = 30 minutes ago). Returns up to 1000 points per request - use cursor for more.",
           inputSchema: {
             type: "object",
             properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              start_time: { type: "string", description: "Start time (ISO or '-1d')" },
-              end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of data points" },
-              cursor: { type: "string", description: "Pagination cursor" },
-              order: { type: "string", description: "Sort order: 'asc' or 'desc'" },
+              stream_id: { 
+                type: "string", 
+                description: "Full stream ID" 
+              },
+              start_time: { 
+                type: "string", 
+                description: "Start time: ISO format '2024-01-01T00:00:00Z' or relative '-1d' (1 day ago), '-12h' (12 hours ago), '-30m' (30 mins ago)" 
+              },
+              end_time: { 
+                type: "string", 
+                description: "End time: ISO format or relative (e.g., '-1h' for 1 hour ago). Omit for 'now'" 
+              },
+              size: { 
+                type: "number", 
+                description: "Max data points to return (default/max: 1000)" 
+              },
+              cursor: { 
+                type: "string", 
+                description: "Pagination cursor for next page of data points" 
+              },
+              order: { 
+                type: "string", 
+                description: "Sort order: 'asc' (oldest first) or 'desc' (newest first, default)" 
+              },
             },
             required: ["stream_id"],
           },
         },
         {
           name: "get_stream_history_bulk",
-          description: "Export stream history to CSV format",
+          description: "Export stream historical data to CSV format. Efficient for large data exports, Excel analysis, or database imports.",
           inputSchema: {
             type: "object",
             properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              fields: { type: "string", description: "Comma-separated fields" },
-              order: { type: "string", description: "Sort order: 'asc' or 'desc'" },
+              stream_id: { type: "string", description: "Full stream ID" },
+              start_time: { type: "string", description: "Start time (ISO or relative like '-7d')" },
+              end_time: { type: "string", description: "End time (ISO or relative)" },
+              fields: { type: "string", description: "Fields to export: 'timestamp,value,quality' or leave empty for all" },
+              order: { type: "string", description: "Sort: 'asc' or 'desc'" },
             },
             required: ["stream_id"],
           },
         },
         {
           name: "get_stream_rollups",
-          description: "Get aggregated/rollup data for a stream (min, max, avg, sum over intervals)",
+          description: "Get aggregated/statistical data over time intervals - like 'hourly averages' or 'daily maximums'. Rollups reduce data points for analysis: instead of 86,400 points/day, get 24 hourly stats. Methods: 'min' (minimum), 'max' (maximum), 'avg' (average), 'sum' (total), 'count' (# of points). Intervals: '5m', '15m', '1h', '6h', '1d', '1w'. Perfect for dashboards showing 'last 30 days daily average temperature'",
           inputSchema: {
             type: "object",
             properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              interval: { type: "string", description: "Rollup interval (e.g., '1h', '1d', '1w')" },
-              method: { type: "string", description: "Aggregation method: min, max, avg, sum, count" },
-              size: { type: "number", description: "Number of rollup points" },
+              stream_id: { type: "string", description: "Full stream ID" },
+              start_time: { type: "string", description: "Start time (ISO or relative)" },
+              end_time: { type: "string", description: "End time (ISO or relative)" },
+              interval: { 
+                type: "string", 
+                description: "Rollup interval: '5m' (5 min), '15m', '30m', '1h' (hour), '6h', '12h', '1d' (day), '1w' (week), '1M' (month)" 
+              },
+              method: { 
+                type: "string", 
+                description: "Aggregation: 'min', 'max', 'avg' (average), 'sum' (total), 'count' (data points). Example: 'avg' for average temperature per hour" 
+              },
+              size: { type: "number", description: "Max rollup points to return" },
               cursor: { type: "string", description: "Pagination cursor" },
             },
             required: ["stream_id"],
@@ -190,133 +262,153 @@ class DigiRemoteManagerServer {
         },
         {
           name: "get_stream_rollups_bulk",
-          description: "Export stream rollups to CSV format",
+          description: "Export stream rollup statistics to CSV format for reporting or analysis",
           inputSchema: {
             type: "object",
             properties: {
-              stream_id: { type: "string", description: "Stream ID" },
-              interval: { type: "string", description: "Rollup interval" },
-              method: { type: "string", description: "Aggregation method" },
+              stream_id: { type: "string", description: "Full stream ID" },
+              interval: { type: "string", description: "Rollup interval (e.g., '1h', '1d')" },
+              method: { type: "string", description: "Aggregation method: min, max, avg, sum, count" },
             },
             required: ["stream_id"],
           },
         },
         {
           name: "get_device_logs",
-          description: "Get device logs for troubleshooting",
+          description: "Get device system logs for troubleshooting connectivity, errors, or debugging device behavior. Logs include connection events, errors, warnings, and system messages with timestamps.",
           inputSchema: {
             type: "object",
             properties: {
               device_id: { type: "string", description: "Device ID" },
-              start_time: { type: "string", description: "Start time" },
-              size: { type: "number", description: "Number of entries" },
+              start_time: { type: "string", description: "Start time (ISO or relative like '-1d')" },
+              size: { type: "number", description: "Number of log entries (max 1000)" },
             },
             required: ["device_id"],
           },
         },
 
-        // GROUPS
+        // ============================================
+        // GROUPS - Device Organization
+        // ============================================
         {
           name: "list_groups",
-          description: "List device groups",
+          description: "List device groups used for organization and batch operations. Groups have hierarchical paths like '/Production/Building-A/Floor-2'. Use groups to organize devices by location, customer, deployment, or any logical structure. Enables bulk operations on all devices in a group.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter groups. Example: 'path startsWith \"/Production\"' or 'description contains \"warehouse\"'" 
+              },
+              orderby: { type: "string", description: "Sort: 'path asc' or 'name desc'" },
             },
           },
         },
         {
           name: "get_group",
-          description: "Get group details",
+          description: "Get details of a specific group including path, description, device count, and nested structure",
           inputSchema: {
             type: "object",
             properties: {
-              group_id: { type: "string", description: "Group ID" },
+              group_id: { type: "string", description: "Group ID (numeric)" },
             },
             required: ["group_id"],
           },
         },
 
-        // ALERTS
+        // ============================================
+        // ALERTS - Monitoring & Notifications
+        // ============================================
         {
           name: "list_alerts",
-          description: "List configured alerts",
+          description: "List alert configurations that trigger on device conditions. Alert types: device offline, excessive disconnects, data point conditions (e.g., 'temp > 80°C'), missing data, health status changes. Alerts can send emails, webhooks, or trigger automations. Use query to find: 'status=\"enabled\"' (active alerts), 'severity=\"critical\"' (critical only)",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter alerts. Examples: 'status=\"enabled\"' (active), 'severity=\"critical\"', 'description contains \"temperature\"'" 
+              },
+              size: { type: "number", description: "Results per page" },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_alert",
-          description: "Get alert details",
+          description: "Get complete alert configuration including conditions, thresholds, notification settings, and trigger history",
           inputSchema: {
             type: "object",
             properties: {
-              alert_id: { type: "string", description: "Alert ID" },
+              alert_id: { type: "string", description: "Alert ID (numeric)" },
             },
             required: ["alert_id"],
           },
         },
 
-        // MONITORS
+        // ============================================
+        // MONITORS - Webhooks & Event Streaming
+        // ============================================
         {
           name: "list_monitors",
-          description: "List monitors (webhooks)",
+          description: "List monitors (webhook integrations that push DRM events to external systems). Monitor types: HTTP (webhooks), TCP (socket streams), Polling (scheduled checks). Use monitors to integrate DRM with external dashboards, ticketing systems, analytics platforms, or custom applications. Topics define what triggers the monitor: 'DataPoint/*' (all data), 'DeviceCore/*' (device events), 'Alert/*' (alert fires)",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter monitors. Examples: 'status=\"active\"' (running), 'type=\"http\"' (webhooks), 'description contains \"API\"'" 
+              },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_monitor",
-          description: "Get monitor details",
+          description: "Get monitor configuration including URL, topics, payload format, headers, batching settings, and current status",
           inputSchema: {
             type: "object",
             properties: {
-              monitor_id: { type: "string", description: "Monitor ID" },
+              monitor_id: { type: "string", description: "Monitor ID (numeric)" },
             },
             required: ["monitor_id"],
           },
         },
         {
           name: "get_monitor_history",
-          description: "Get monitor polling history",
+          description: "Get monitor execution history showing successful/failed deliveries, response codes, timestamps, and error details. Use for debugging webhook issues or monitoring integration health.",
           inputSchema: {
             type: "object",
             properties: {
               monitor_id: { type: "string", description: "Monitor ID" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of entries" },
+              start_time: { type: "string", description: "Start time (ISO or relative)" },
+              end_time: { type: "string", description: "End time (ISO or relative)" },
+              size: { type: "number", description: "Number of history entries" },
             },
             required: ["monitor_id"],
           },
         },
 
-        // AUTOMATIONS
+        // ============================================
+        // AUTOMATIONS - Workflow Automation
+        // ============================================
         {
           name: "list_automations",
-          description: "List automations",
+          description: "List automation workflows that execute actions based on triggers. Automations can: update device configs, send commands, run scripts, trigger firmware updates, send notifications, or call APIs. Triggers: schedule (cron), alert fires, device connects/disconnects, data conditions. Use for: scheduled reboots, auto-config deployment, incident response, compliance checks.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter automations. Examples: 'status=\"enabled\"', 'name contains \"reboot\"'" 
+              },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_automation",
-          description: "Get automation details",
+          description: "Get automation configuration including trigger conditions, actions, schedule, execution history, and enabled status",
           inputSchema: {
             type: "object",
             properties: {
@@ -327,19 +419,22 @@ class DigiRemoteManagerServer {
         },
         {
           name: "list_automation_runs",
-          description: "List automation execution history",
+          description: "List automation execution history showing when automations ran, success/failure status, affected devices, and error details. Use for auditing, troubleshooting failed automations, or compliance reporting.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter runs. Examples: 'status=\"failed\"' (failures only), 'start_time>-7d' (last week)" 
+              },
+              size: { type: "number", description: "Results per page" },
+              orderby: { type: "string", description: "Sort: 'start_time desc' for most recent" },
             },
           },
         },
         {
           name: "get_automation_run",
-          description: "Get automation run details",
+          description: "Get detailed execution log for a specific automation run including step-by-step actions, device responses, timing, and any errors",
           inputSchema: {
             type: "object",
             properties: {
@@ -350,7 +445,7 @@ class DigiRemoteManagerServer {
         },
         {
           name: "list_automation_schedules",
-          description: "List automation schedules",
+          description: "List automation schedules showing when automations are configured to run (cron expressions, recurring patterns)",
           inputSchema: {
             type: "object",
             properties: {
@@ -361,7 +456,7 @@ class DigiRemoteManagerServer {
         },
         {
           name: "get_automation_schedule",
-          description: "Get schedule details",
+          description: "Get schedule configuration details for an automation including cron pattern, timezone, next run time",
           inputSchema: {
             type: "object",
             properties: {
@@ -371,34 +466,39 @@ class DigiRemoteManagerServer {
           },
         },
 
-        // JOBS
+        // ============================================
+        // JOBS - Long-Running Operations
+        // ============================================
         {
           name: "list_jobs",
-          description: "List jobs (firmware updates, configs, etc.)",
+          description: "List jobs (asynchronous operations) like firmware updates, config deployments, bulk device operations. Jobs track progress across multiple devices, show success/failure counts, and can be monitored for completion. Job types: firmware_update, config_deploy, device_command, bulk_operation. Status: queued, running, completed, failed, cancelled.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
+              query: { 
+                type: "string", 
+                description: "Filter jobs. Examples: 'status=\"running\"' (active jobs), 'type=\"firmware_update\"', 'start_time>-1d' (today's jobs)" 
+              },
+              size: { type: "number", description: "Results per page" },
               cursor: { type: "string", description: "Pagination cursor" },
-              orderby: { type: "string", description: "Sort field" },
+              orderby: { type: "string", description: "Sort: 'start_time desc' for most recent" },
             },
           },
         },
         {
           name: "list_jobs_bulk",
-          description: "Export jobs to CSV",
+          description: "Export jobs to CSV for reporting or analysis of deployment history",
           inputSchema: {
             type: "object",
             properties: {
               query: { type: "string", description: "Query filter" },
-              fields: { type: "string", description: "Comma-separated fields" },
+              fields: { type: "string", description: "Comma-separated fields to export" },
             },
           },
         },
         {
           name: "get_job",
-          description: "Get job details",
+          description: "Get job details including status, progress (%), success/failure counts per device, start/end times, and device-level results. Poll this endpoint to monitor job completion.",
           inputSchema: {
             type: "object",
             properties: {
@@ -408,21 +508,26 @@ class DigiRemoteManagerServer {
           },
         },
 
-        // FIRMWARE
+        // ============================================
+        // FIRMWARE - Device Firmware Management
+        // ============================================
         {
           name: "list_firmware",
-          description: "List firmware versions",
+          description: "List available firmware versions for devices. Firmware entries include version, file size, supported device types, SHA checksums, release notes, production/beta status. Use to find available firmware before deploying updates.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter firmware. Examples: 'type=\"ConnectPort X4\"', 'version=\"1.2.3\"', 'production=true'" 
+              },
+              orderby: { type: "string", description: "Sort: 'version desc' for latest first" },
             },
           },
         },
         {
           name: "get_firmware",
-          description: "Get firmware details",
+          description: "Get firmware details including download URL, checksums, compatible devices, release notes, and security information",
           inputSchema: {
             type: "object",
             properties: {
@@ -433,32 +538,37 @@ class DigiRemoteManagerServer {
         },
         {
           name: "list_firmware_updates",
-          description: "List firmware update operations",
+          description: "List firmware update jobs/operations showing deployment status across devices. Each update shows target devices, firmware version, progress, success/failure counts, and completion status.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              size: { type: "number", description: "Number of results" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter updates. Examples: 'status=\"in_progress\"', 'start_time>-7d'" 
+              },
+              size: { type: "number", description: "Results per page" },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_firmware_update",
-          description: "Get firmware update status",
+          description: "Get firmware update operation status including per-device progress, success/failure details, error messages, and completion percentage",
           inputSchema: {
             type: "object",
             properties: {
-              update_id: { type: "string", description: "Update ID" },
+              update_id: { type: "string", description: "Firmware update ID" },
             },
             required: ["update_id"],
           },
         },
 
-        // REPORTS
+        // ============================================
+        // REPORTS - Analytics & Dashboards
+        // ============================================
         {
           name: "list_reports",
-          description: "List available report types",
+          description: "List available report types in DRM. Reports provide analytics on device status, connectivity, data usage, health trends. Use to discover what reporting capabilities are available.",
           inputSchema: {
             type: "object",
             properties: {},
@@ -466,105 +576,130 @@ class DigiRemoteManagerServer {
         },
         {
           name: "get_connection_report",
-          description: "Get connection status summary",
+          description: "Get connection status summary showing counts of connected vs disconnected devices, connection trends, average uptime. Useful for dashboard widgets showing fleet connectivity health at-a-glance.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              group: { type: "string", description: "Limit to group" },
+              query: { 
+                type: "string", 
+                description: "Filter devices for report (e.g., 'group startsWith \"/Production\"')" 
+              },
+              group: { 
+                type: "string", 
+                description: "Limit report to specific group path (e.g., '/Production/Building-A')" 
+              },
             },
           },
         },
         {
           name: "get_alert_report",
-          description: "Get alert summary",
+          description: "Get alert activity summary showing fired alerts, most common alert types, alert trends over time. Use for understanding alert patterns and system health.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
+              query: { type: "string", description: "Filter devices or alerts" },
+              start_time: { type: "string", description: "Report start time" },
+              end_time: { type: "string", description: "Report end time" },
             },
           },
         },
         {
           name: "get_device_report",
-          description: "Get device summary by dimension: health_status, firmware_version, connection_status, carrier, signal_percent, type, vendor_id, restricted_status, compliance, tags",
+          description: "Get device summary report by dimension/category. Dimensions: 'health_status' (error/warning/ok counts), 'firmware_version' (version distribution), 'connection_status' (connected/disconnected), 'carrier' (cellular carrier breakdown), 'signal_percent' (signal strength distribution), 'type' (device model counts), 'vendor_id', 'restricted_status', 'compliance', 'tags'. Perfect for fleet composition analysis, compliance reports, identifying outdated firmware.",
           inputSchema: {
             type: "object",
             properties: {
-              report_type: { type: "string", description: "Report dimension" },
-              query: { type: "string", description: "Query filter" },
-              group: { type: "string", description: "Limit to group" },
-              scope: { type: "string", description: "For cellular: primary/secondary" },
+              report_type: { 
+                type: "string", 
+                description: "Dimension to report on: health_status, firmware_version, connection_status, carrier, signal_percent, type, vendor_id, restricted_status, compliance, or tags" 
+              },
+              query: { 
+                type: "string", 
+                description: "Filter devices for report" 
+              },
+              group: { 
+                type: "string", 
+                description: "Limit to group path" 
+              },
+              scope: { 
+                type: "string", 
+                description: "For cellular reports: 'primary' or 'secondary' SIM" 
+              },
             },
             required: ["report_type"],
           },
         },
         {
           name: "get_cellular_utilization_report",
-          description: "Get cellular data usage statistics",
+          description: "Get cellular data usage statistics showing bytes sent/received per device, data plan consumption, overage alerts, usage trends. Essential for managing cellular costs and data plan allocation.",
           inputSchema: {
             type: "object",
             properties: {
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              query: { type: "string", description: "Query filter" },
+              start_time: { type: "string", description: "Report period start" },
+              end_time: { type: "string", description: "Report period end" },
+              query: { type: "string", description: "Filter devices (e.g., 'carrier=\"AT&T\"')" },
             },
           },
         },
         {
           name: "get_device_availability_report",
-          description: "Get device uptime statistics",
+          description: "Get device uptime/availability statistics showing percentage of time devices were connected, disconnect counts, average connection duration, availability trends. Use for SLA reporting and reliability analysis.",
           inputSchema: {
             type: "object",
             properties: {
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              query: { type: "string", description: "Query filter" },
+              start_time: { type: "string", description: "Report period start" },
+              end_time: { type: "string", description: "Report period end" },
+              query: { type: "string", description: "Filter devices for report" },
             },
           },
         },
 
-        // Templates
+        // ============================================
+        // TEMPLATES - Configuration Management
+        // ============================================
         {
           name: "list_templates",
-          description: "List configuration templates",
+          description: "List configuration templates used for standardized device configuration deployment. Templates define settings like network config, security policies, connection parameters. Use templates to ensure consistent configuration across device fleets and simplify mass configuration updates.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter templates (e.g., 'name contains \"production\"')" 
+              },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_template",
-          description: "Get template details",
+          description: "Get configuration template details including settings definition, assigned devices, version, and modification history",
           inputSchema: {
             type: "object",
             properties: {
-              config_id: { type: "string", description: "Config ID" },
+              config_id: { type: "string", description: "Configuration/Template ID" },
             },
             required: ["config_id"],
           },
         },
 
-        // HEALTH CONFIGS
+        // ============================================
+        // HEALTH CONFIGS - Device Health Monitoring
+        // ============================================
         {
           name: "list_health_configs",
-          description: "List health monitoring configurations",
+          description: "List health monitoring configurations that define health check rules and thresholds. Health configs determine what makes a device 'healthy' vs 'warning' vs 'error' status (e.g., signal thresholds, memory limits, temperature ranges). Applied to devices to enable automated health scoring.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { type: "string", description: "Filter health configs" },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_health_config",
-          description: "Get health config details",
+          description: "Get health configuration details including rules, thresholds, severity levels, and assigned devices",
           inputSchema: {
             type: "object",
             properties: {
@@ -574,49 +709,59 @@ class DigiRemoteManagerServer {
           },
         },
 
-        // EVENTS
+        // ============================================
+        // EVENTS - Audit Trail & Activity Log
+        // ============================================
         {
           name: "list_events",
-          description: "List events from event log (audit trail)",
+          description: "List events from audit trail showing system activity: user logins, API calls, device connections/disconnections, configuration changes, alert triggers, automation executions. Events include facility (system area), operation type, user/device ID, timestamps, and details. Essential for security auditing, compliance, troubleshooting, and activity tracking.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              start_time: { type: "string", description: "Start time" },
-              end_time: { type: "string", description: "End time" },
-              size: { type: "number", description: "Number of events" },
+              query: { 
+                type: "string", 
+                description: "Filter events. Examples: 'facility=\"AUTHENTICATION\"' (login events), 'operation=\"UPDATE\"' (changes), 'device_id=\"...\"' (device activity), 'user_id=\"...\"' (user actions)" 
+              },
+              start_time: { type: "string", description: "Start time (ISO or relative like '-7d')" },
+              end_time: { type: "string", description: "End time (ISO or relative)" },
+              size: { type: "number", description: "Max events to return" },
             },
           },
         },
         {
           name: "list_events_bulk",
-          description: "Export events to CSV",
+          description: "Export events to CSV for analysis, archival, SIEM integration, or compliance reporting",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
+              query: { type: "string", description: "Filter events" },
               start_time: { type: "string", description: "Start time" },
               end_time: { type: "string", description: "End time" },
-              fields: { type: "string", description: "Comma-separated fields" },
+              fields: { type: "string", description: "Comma-separated fields to export" },
             },
           },
         },
 
-        // USERS
+        // ============================================
+        // USERS - Account & Access Management
+        // ============================================
         {
           name: "list_users",
-          description: "List users",
+          description: "List users with access to the Remote Manager account. Shows user roles, permissions, email, last login, and status. Use for access auditing and user management.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter users (e.g., 'status=\"active\"', 'role=\"admin\"')" 
+              },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_user",
-          description: "Get user details",
+          description: "Get user details including permissions, role, contact info, and activity history",
           inputSchema: {
             type: "object",
             properties: {
@@ -626,21 +771,26 @@ class DigiRemoteManagerServer {
           },
         },
 
-        // FILES
+        // ============================================
+        // FILES - File Storage & Management
+        // ============================================
         {
           name: "list_files",
-          description: "List files",
+          description: "List files stored in Remote Manager (firmware files, config files, scripts, logs uploaded from devices). Files can be used in automations, firmware updates, or referenced by devices.",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
-              orderby: { type: "string", description: "Sort field" },
+              query: { 
+                type: "string", 
+                description: "Filter files (e.g., 'name contains \".bin\"', 'type=\"firmware\"')" 
+              },
+              orderby: { type: "string", description: "Sort order" },
             },
           },
         },
         {
           name: "get_file",
-          description: "Get file details",
+          description: "Get file details including size, upload date, checksums, and download URL",
           inputSchema: {
             type: "object",
             properties: {
@@ -650,10 +800,12 @@ class DigiRemoteManagerServer {
           },
         },
 
-        // ACCOUNT
+        // ============================================
+        // ACCOUNT - Account Information
+        // ============================================
         {
           name: "get_account_info",
-          description: "Get account information",
+          description: "Get Remote Manager account information including account name, customer ID, subscription level, feature entitlements, usage limits, and contact details",
           inputSchema: {
             type: "object",
             properties: {},
@@ -661,122 +813,194 @@ class DigiRemoteManagerServer {
         },
         {
           name: "get_account_security",
-          description: "Get account security settings",
+          description: "Get account security settings including password policies, session timeouts, IP restrictions, 2FA requirements, and security compliance settings",
           inputSchema: {
             type: "object",
             properties: {
-              system_defaults: { type: "boolean", description: "Get system defaults" },
+              system_defaults: { 
+                type: "boolean", 
+                description: "Get system default security settings (true) or account-specific (false)" 
+              },
             },
           },
         },
 
-        // UTILITY
+        // ============================================
+        // UTILITY - API Discovery
+        // ============================================
         {
           name: "get_api_info",
-          description: "Get self-documented API info for endpoint discovery",
+          description: "Get self-documented API information showing available endpoints, parameters, and usage. DRM APIs are self-documenting - call any endpoint without parameters to see its structure. Use empty endpoint for top-level API catalog.",
           inputSchema: {
             type: "object",
             properties: {
-              endpoint: { type: "string", description: "Endpoint name or empty for top-level" },
+              endpoint: { 
+                type: "string", 
+                description: "API endpoint to describe (e.g., 'devices', 'streams') or empty for top-level catalog" 
+              },
             },
           },
         },
 
         // ============================================
-        // SCI - SERVER COMMAND INTERFACE OPERATIONS
+        // SCI - SERVER COMMAND INTERFACE (Direct Device Communication)
         // ============================================
         
-        // SCI - DEVICE QUERY OPERATIONS
         {
           name: "sci_query_device_state",
-          description: "Query device state via SCI/RCI (device_stats, interface_info, etc.). Can query from device or cached data.",
+          description: "Query live device state via SCI/RCI - get real-time info directly from device. State groups: 'device_stats' (CPU/memory), 'interface_info' (network interfaces), 'mobile_stats' (cellular signal/carrier), 'system_info' (uptime/version), 'gps_stats' (location), etc. Use cache=true for faster response from DRM cache (recent data) or cache=false for live device query (slower, device must be connected). Empty state_group returns all available state. Use sci_query_descriptor first to see what state groups a device supports.",
           inputSchema: {
             type: "object",
             properties: {
-              device_id: { type: "string", description: "Device ID" },
-              state_group: { type: "string", description: "State group to query (e.g., 'device_stats', 'interface_info', or empty for all)" },
-              use_cache: { type: "boolean", description: "Query cached data instead of live device (faster)", default: true },
-              timeout: { type: "number", description: "Request timeout in seconds", default: 30 },
+              device_id: { 
+                type: "string", 
+                description: "Device ID" 
+              },
+              state_group: { 
+                type: "string", 
+                description: "State group to query: 'device_stats', 'interface_info', 'mobile_stats', 'system_info', 'gps_stats', etc. Empty = all state groups. See descriptor for device-specific options." 
+              },
+              use_cache: { 
+                type: "boolean", 
+                description: "true = fast cached data (recent), false = live device query (slower, device must be connected)", 
+                default: true 
+              },
+              timeout: { 
+                type: "number", 
+                description: "Request timeout in seconds (for live queries)", 
+                default: 30 
+              },
             },
             required: ["device_id"],
           },
         },
         {
           name: "sci_query_device_settings",
-          description: "Query device configuration settings via SCI/RCI. Returns current device configuration.",
+          description: "Query device configuration settings via SCI/RCI. Returns current device config (network settings, security, connection params, etc). Settings_group examples: 'network', 'security', 'cellular', 'wifi', 'serial', etc. Empty settings_group returns all settings. Source options: 'current' (running config), 'stored' (saved to flash), 'defaults' (factory defaults). Use to audit device config or compare current vs stored settings.",
           inputSchema: {
             type: "object",
             properties: {
               device_id: { type: "string", description: "Device ID" },
-              settings_group: { type: "string", description: "Settings group to query (or empty for all)" },
-              use_cache: { type: "boolean", description: "Query cached settings", default: true },
-              source: { type: "string", description: "Source: 'current' (default), 'stored', or 'defaults'", default: "current" },
+              settings_group: { 
+                type: "string", 
+                description: "Settings group: 'network', 'security', 'cellular', 'wifi', etc. Empty = all settings. See descriptor for options." 
+              },
+              use_cache: { 
+                type: "boolean", 
+                description: "Use cached settings (true) or query device (false)", 
+                default: true 
+              },
+              source: { 
+                type: "string", 
+                description: "Config source: 'current' (running config), 'stored' (saved config), 'defaults' (factory)", 
+                default: "current" 
+              },
             },
             required: ["device_id"],
           },
         },
         {
           name: "sci_query_descriptor",
-          description: "Get RCI descriptor for device - shows available commands, settings, and state groups for that device type",
+          description: "Get RCI descriptor for device - discovers device capabilities, available state groups, settings groups, and RCI commands supported by that device model/firmware. Returns XML structure showing all queryable/configurable elements. Essential first step before querying device - shows what's available for that specific device type.",
           inputSchema: {
             type: "object",
             properties: {
               device_id: { type: "string", description: "Device ID" },
-              element: { type: "string", description: "Specific element to describe (or empty for root)" },
+              element: { 
+                type: "string", 
+                description: "Specific element to describe (e.g., 'device_stats') or empty for root descriptor showing all capabilities" 
+              },
             },
             required: ["device_id"],
           },
         },
         {
           name: "sci_query_multiple_devices",
-          description: "Query state/settings from multiple devices at once (by device IDs, tags, or group)",
+          description: "Query state or settings from multiple devices at once - bulk device operations. Target devices by: device IDs list, tag (all devices with tag), group path (all devices in group), or 'all'. Synchronous mode waits for all devices to respond. Asynchronous returns job ID immediately - poll sci_get_job_status for results. Use for fleet-wide queries like 'get signal strength from all field devices' or 'check firmware version on production group'.",
           inputSchema: {
             type: "object",
             properties: {
-              target_type: { type: "string", description: "Target type: 'device_ids', 'tag', 'group', or 'all'", default: "device_ids" },
-              target_value: { type: "string", description: "Device IDs (comma-separated), tag name, or group path" },
-              query_type: { type: "string", description: "Query type: 'state' or 'setting'", default: "state" },
-              query_content: { type: "string", description: "What to query (e.g., 'device_stats')" },
-              use_cache: { type: "boolean", description: "Use cached data", default: true },
-              synchronous: { type: "boolean", description: "Wait for completion (false = async job)", default: true },
+              target_type: { 
+                type: "string", 
+                description: "How to target devices: 'device_ids' (list), 'tag' (by tag name), 'group' (by group path), 'all' (all devices)", 
+                default: "device_ids" 
+              },
+              target_value: { 
+                type: "string", 
+                description: "Target value: comma-separated device IDs, tag name (e.g., 'production'), or group path (e.g., '/Field/Region-1')" 
+              },
+              query_type: { 
+                type: "string", 
+                description: "What to query: 'state' (device state/stats) or 'setting' (config settings)", 
+                default: "state" 
+              },
+              query_content: { 
+                type: "string", 
+                description: "What to query: e.g., 'device_stats' for state, 'network' for settings. Empty = all" 
+              },
+              use_cache: { 
+                type: "boolean", 
+                description: "Use cached data (fast) or query devices live (slow)", 
+                default: true 
+              },
+              synchronous: { 
+                type: "boolean", 
+                description: "true = wait for all responses, false = async job (get job ID, poll for completion)", 
+                default: true 
+              },
             },
             required: ["target_value", "query_type"],
           },
         },
-
-        // SCI - FILE SYSTEM OPERATIONS
         {
           name: "sci_list_device_files",
-          description: "List files on device file system via SCI",
+          description: "List files on device file system via SCI. Shows files/directories on device storage including logs, configs, data files, Python scripts. Hash parameter adds file checksums for integrity verification (useful for detecting file changes or corruption). Use for remote file system browsing, log file discovery, or audit of device-stored data.",
           inputSchema: {
             type: "object",
             properties: {
               device_id: { type: "string", description: "Device ID" },
-              path: { type: "string", description: "Directory path to list", default: "/" },
-              hash: { type: "string", description: "Include file hashes: 'none', 'any', 'md5', 'sha3-512'", default: "none" },
+              path: { 
+                type: "string", 
+                description: "Directory path to list (e.g., '/', '/logs', '/config')", 
+                default: "/" 
+              },
+              hash: { 
+                type: "string", 
+                description: "Include file checksums: 'none' (no hash), 'any' (any available), 'md5', 'sha3-512'", 
+                default: "none" 
+              },
             },
             required: ["device_id"],
           },
         },
         {
           name: "sci_get_device_file",
-          description: "Get file contents from device via SCI",
+          description: "Download/read file content from device file system via SCI. Retrieves file data from device storage - logs, configs, sensor data files, Python scripts. Supports partial reads (offset/length) for large files. Use for remote log retrieval, config backup, or reading device-generated data files.",
           inputSchema: {
             type: "object",
             properties: {
               device_id: { type: "string", description: "Device ID" },
-              path: { type: "string", description: "File path" },
-              offset: { type: "number", description: "Byte offset to start reading", default: 0 },
-              length: { type: "number", description: "Number of bytes to read (0 = all)", default: 0 },
+              path: { 
+                type: "string", 
+                description: "Full file path on device (e.g., '/logs/system.log', '/config/settings.xml')" 
+              },
+              offset: { 
+                type: "number", 
+                description: "Byte offset to start reading (0 = start of file)", 
+                default: 0 
+              },
+              length: { 
+                type: "number", 
+                description: "Number of bytes to read (0 = read entire file)", 
+                default: 0 
+              },
             },
             required: ["device_id", "path"],
           },
         },
-
-        // SCI - FIRMWARE QUERY
         {
           name: "sci_query_firmware_targets",
-          description: "Query available firmware targets on device (what firmware can be updated)",
+          description: "Query available firmware targets on device - discovers what firmware components can be updated. Returns list of updatable targets like 'system firmware', 'bootloader', 'modem firmware', 'XBee radio firmware'. Use before firmware update to know what can be updated and current versions.",
           inputSchema: {
             type: "object",
             properties: {
@@ -785,28 +1009,30 @@ class DigiRemoteManagerServer {
             required: ["device_id"],
           },
         },
-
-        // SCI - JOB STATUS
         {
           name: "sci_get_job_status",
-          description: "Get status of asynchronous SCI job by job ID",
+          description: "Get status of asynchronous SCI job. When using synchronous=false for multi-device operations, you get a job ID. Poll this endpoint to check job status (queued/running/completed/failed) and get results when ready. Shows per-device success/failure, completion percentage, and result data.",
           inputSchema: {
             type: "object",
             properties: {
-              job_id: { type: "string", description: "SCI Job ID returned from async operation" },
+              job_id: { 
+                type: "string", 
+                description: "SCI Job ID returned from async operation (e.g., from sci_query_multiple_devices with synchronous=false)" 
+              },
             },
             required: ["job_id"],
           },
         },
-
-        // SCI - DATA SERVICE (Read from DRM storage)
         {
           name: "sci_get_data_service_file",
-          description: "Get file from Remote Manager Data Services storage",
+          description: "Get file from Remote Manager Data Services storage (cloud storage for device-uploaded data). Devices can upload files to DRM storage (logs, data files, backups) using Data Services. Path format: 'db://path/to/file.xml' or '/~/path'. Use to retrieve device-uploaded files stored in DRM cloud.",
           inputSchema: {
             type: "object",
             properties: {
-              file_path: { type: "string", description: "Path in Data Services (e.g., 'db://path/to/file.xml')" },
+              file_path: { 
+                type: "string", 
+                description: "Path in Data Services storage. Format: 'db://path/to/file' or '/~/path'. Example: 'db://devices/00000000/logs/system.log'" 
+              },
             },
             required: ["file_path"],
           },
