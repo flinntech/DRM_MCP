@@ -5,6 +5,7 @@
  * Full API coverage with 60+ tools including SCI/RCI operations
  */
 
+import dotenv from "dotenv";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -14,23 +15,31 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
 
+// Load environment variables from .env file
+dotenv.config();
+
 const DRM_BASE_URL = "https://remotemanager.digi.com/ws";
 
 // ============================================
-// CONFIGURATION - Put your API key here
+// CONFIGURATION - Load from environment variables
 // ============================================
-const API_KEY_ID = "YOUR_API_KEY_ID_HERE";
-const API_KEY_SECRET = "YOUR_API_KEY_HERE";
+const API_KEY_ID = process.env.DRM_API_KEY_ID;
+const API_KEY_SECRET = process.env.DRM_API_KEY_SECRET;
 // ============================================
 
 class DigiRemoteManagerServer {
   constructor() {
-    if (!API_KEY_ID || !API_KEY_SECRET || API_KEY_ID === "YOUR_API_KEY_ID_HERE" || API_KEY_SECRET === "YOUR_API_KEY_HERE") {
+    if (!API_KEY_ID || !API_KEY_SECRET) {
       console.error("╔════════════════════════════════════════════════════════════╗");
-      console.error("║  ERROR: API key not configured                            ║");
+      console.error("║  ERROR: API credentials not configured                    ║");
       console.error("╚════════════════════════════════════════════════════════════╝");
       console.error("");
-      console.error("Please edit this file and configure your API key ID and secret.");
+      console.error("Please set the following environment variables:");
+      console.error("  - DRM_API_KEY_ID");
+      console.error("  - DRM_API_KEY_SECRET");
+      console.error("");
+      console.error("You can set them in a .env file or export them in your shell.");
+      console.error("See .env.example for reference.");
       console.error("");
       process.exit(1);
     }
