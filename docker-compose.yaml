@@ -5,18 +5,14 @@ services:
       dockerfile: Dockerfile
     container_name: drm-mcp-server
     environment:
-      # RECOMMENDED: Use API key authentication
-      - DRM_API_KEY=${DRM_API_KEY}
-      
-      # Alternative: Use username/password authentication
-      # Uncomment these and comment out DRM_API_KEY if using username/password
-      # - DRM_USERNAME=${DRM_USERNAME}
-      # - DRM_PASSWORD=${DRM_PASSWORD}
-      
+      # RECOMMENDED: Use API key authentication (both ID and Secret required)
+      - DRM_API_KEY_ID=${DRM_API_KEY_ID}
+      - DRM_API_KEY_SECRET=${DRM_API_KEY_SECRET}
+
       # Node.js environment
       - NODE_ENV=production
-      
-      #http stuff
+
+      # MCP Server transport configuration
       - MCP_TRANSPORT=http
       - MCP_PORT=3000
     
