@@ -1,15 +1,51 @@
 # Digi Remote Manager MCP Server
 
-Model Context Protocol (MCP) server for Digi Remote Manager API integration. Provides 60+ tools for managing IoT devices, data streams, alerts, automations, and more.
+Model Context Protocol (MCP) server for Digi Remote Manager API integration. Provides 62 tools for managing IoT devices, data streams, alerts, automations, and more.
 
 ## Features
 
-- **60+ API Tools**: Full coverage of Digi Remote Manager REST API
+- **Dynamic Tool Loading**: Reduces initial context by ~70% - only loads tools you need
+- **62 API Tools**: Full coverage of Digi Remote Manager REST API (13 core + 49 on-demand)
 - **SCI/RCI Support**: Direct device communication via Server Command Interface
 - **Device Management**: Query devices, groups, firmware, configurations
 - **Data Streams**: Access time-series telemetry data with rollups
 - **Monitoring**: Alerts, monitors, automations, and reports
 - **Multiple Transports**: Supports stdio and HTTP transports
+
+## Dynamic Tool System
+
+The server uses a category-based dynamic tool loading system to reduce LLM context usage:
+
+### Core Tools (Always Available - 13 tools)
+- **Tool Management**: `discover_tool_categories`, `enable_tool_category`
+- **Device Basics**: `list_devices`, `get_device`
+- **Stream Basics**: `list_streams`, `get_stream`, `get_stream_history`
+- **Organization**: `list_groups`, `get_group`
+- **Monitoring**: `list_alerts`, `get_alert`
+- **Account**: `get_account_info`, `get_api_info`
+
+### On-Demand Categories (49 tools organized into 10 categories)
+
+Load additional tools by category using `enable_tool_category`:
+
+- **bulk_operations** (6 tools) - CSV export for devices, streams, jobs, events
+- **advanced_data** (3 tools) - Stream rollups, aggregations, device logs
+- **reports** (6 tools) - Connection, alert, device, cellular, availability reports
+- **automations** (6 tools) - Workflow automation management
+- **firmware** (4 tools) - Firmware management and updates
+- **sci** (9 tools) - Direct device communication via SCI/RCI
+- **monitors** (3 tools) - Webhook and monitor management
+- **jobs** (2 tools) - Async job tracking
+- **admin** (9 tools) - Users, files, templates, health configs, security
+- **events** (2 tools) - Audit trail and event history
+
+### Usage Pattern
+
+1. Connect to server - only 13 core tools visible
+2. Call `discover_tool_categories` to see available categories
+3. Call `enable_tool_category` with category name (e.g., `"reports"`)
+4. All tools in that category become available
+5. Repeat as needed for other categories
 
 ## Prerequisites
 
@@ -109,6 +145,26 @@ docker run -d \
 | `NODE_ENV` | No | `production` | Node environment |
 
 ## Usage Examples
+
+### Discover Available Tool Categories
+
+```json
+{
+  "tool": "discover_tool_categories",
+  "arguments": {}
+}
+```
+
+### Enable a Tool Category
+
+```json
+{
+  "tool": "enable_tool_category",
+  "arguments": {
+    "category": "reports"
+  }
+}
+```
 
 ### List Connected Devices
 

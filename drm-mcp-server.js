@@ -56,10 +56,16 @@ class DigiRemoteManagerServer {
 
     console.error("✓ DRM MCP Server initialized with API Key authentication");
 
+    // Dynamic tool management: track enabled categories
+    this.enabledCategories = new Set();
+
+    // Define tool categories
+    this.initializeToolCategories();
+
     this.server = new Server(
       {
         name: "digi-remote-manager",
-        version: "2.0.0",
+        version: "3.0.0",
       },
       {
         capabilities: {
@@ -69,11 +75,307 @@ class DigiRemoteManagerServer {
     );
 
     this.setupHandlers();
+    console.error("✓ Dynamic tool loading enabled - use 'discover_tool_categories' to see available categories");
+  }
+
+  initializeToolCategories() {
+    // Define available tool categories with metadata
+    this.toolCategories = {
+      bulk_operations: {
+        name: "bulk_operations",
+        display_name: "Bulk Operations & CSV Exports",
+        description: "Export tools for CSV generation: device lists, stream data, jobs, events. Use for data analysis, Excel imports, or reporting.",
+        tool_count: 5,
+        tools: ["list_devices_bulk", "list_streams_bulk", "get_stream_history_bulk", "get_stream_rollups_bulk", "list_jobs_bulk", "list_events_bulk"]
+      },
+      advanced_data: {
+        name: "advanced_data",
+        display_name: "Advanced Data Operations",
+        description: "Advanced data tools: stream rollups (aggregations/statistics), device logs, stream analytics.",
+        tool_count: 3,
+        tools: ["get_stream_rollups", "get_stream_rollups_bulk", "get_device_logs"]
+      },
+      reports: {
+        name: "reports",
+        display_name: "Reports & Analytics",
+        description: "Analytics dashboards: connection reports, alert summaries, device breakdowns, cellular usage, availability stats.",
+        tool_count: 6,
+        tools: ["list_reports", "get_connection_report", "get_alert_report", "get_device_report", "get_cellular_utilization_report", "get_device_availability_report"]
+      },
+      automations: {
+        name: "automations",
+        display_name: "Automation & Workflows",
+        description: "Workflow automation tools: list/manage automations, execution history, schedules. For automated device operations.",
+        tool_count: 6,
+        tools: ["list_automations", "get_automation", "list_automation_runs", "get_automation_run", "list_automation_schedules", "get_automation_schedule"]
+      },
+      firmware: {
+        name: "firmware",
+        display_name: "Firmware Management",
+        description: "Firmware operations: list available firmware, view details, track firmware updates across devices.",
+        tool_count: 4,
+        tools: ["list_firmware", "get_firmware", "list_firmware_updates", "get_firmware_update"]
+      },
+      sci: {
+        name: "sci",
+        display_name: "SCI - Server Command Interface",
+        description: "Direct device communication via SCI/RCI: query live state, settings, file system, bulk operations. For real-time device interaction.",
+        tool_count: 9,
+        tools: ["sci_query_device_state", "sci_query_device_settings", "sci_query_descriptor", "sci_query_multiple_devices", "sci_list_device_files", "sci_get_device_file", "sci_query_firmware_targets", "sci_get_job_status", "sci_get_data_service_file"]
+      },
+      monitors: {
+        name: "monitors",
+        display_name: "Monitors & Webhooks",
+        description: "Webhook monitoring: list/manage HTTP monitors, view execution history. For external system integrations.",
+        tool_count: 3,
+        tools: ["list_monitors", "get_monitor", "get_monitor_history"]
+      },
+      jobs: {
+        name: "jobs",
+        display_name: "Jobs & Async Operations",
+        description: "Async job management: track firmware updates, config deployments, bulk operations. Monitor long-running tasks.",
+        tool_count: 2,
+        tools: ["list_jobs", "get_job"]
+      },
+      admin: {
+        name: "admin",
+        display_name: "Administration & Configuration",
+        description: "Admin tools: users, files, templates, health configs, account security. For account/config management.",
+        tool_count: 9,
+        tools: ["list_users", "get_user", "list_files", "get_file", "list_templates", "get_template", "list_health_configs", "get_health_config", "get_account_security"]
+      },
+      events: {
+        name: "events",
+        display_name: "Events & Audit Trail",
+        description: "Audit trail tools: list events, export events to CSV. For security auditing, compliance, activity tracking.",
+        tool_count: 2,
+        tools: ["list_events", "list_events_bulk"]
+      }
+    };
+
+    // Define core tools that are always available
+    this.coreTools = [
+      "discover_tool_categories",
+      "enable_tool_category",
+      "list_devices",
+      "get_device",
+      "list_streams",
+      "get_stream",
+      "get_stream_history",
+      "list_groups",
+      "get_group",
+      "list_alerts",
+      "get_alert",
+      "get_account_info",
+      "get_api_info"
+    ];
   }
 
   setupHandlers() {
+    // Store all tool definitions - we'll filter based on enabled categories
+    this.defineAllTools();
+
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
+      tools: this.getEnabledTools()
+    }));
+
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      try {
+        const { name, arguments: args } = request.params;
+
+        switch (name) {
+          // Dynamic tool management
+          case "discover_tool_categories": return this.discoverToolCategories();
+          case "enable_tool_category": return this.enableToolCategory(args);
+
+          // Original tools
+          case "list_devices": return await this.listDevices(args);
+          case "list_devices_bulk": return await this.listDevicesBulk(args);
+          case "get_device": return await this.getDevice(args);
+          case "list_streams": return await this.listStreams(args);
+          case "list_streams_bulk": return await this.listStreamsBulk(args);
+          case "get_stream": return await this.getStream(args);
+          case "get_stream_history": return await this.getStreamHistory(args);
+          case "get_stream_history_bulk": return await this.getStreamHistoryBulk(args);
+          case "get_stream_rollups": return await this.getStreamRollups(args);
+          case "get_stream_rollups_bulk": return await this.getStreamRollupsBulk(args);
+          case "get_device_logs": return await this.getDeviceLogs(args);
+          case "list_groups": return await this.listGroups(args);
+          case "get_group": return await this.getGroup(args);
+          case "list_alerts": return await this.listAlerts(args);
+          case "get_alert": return await this.getAlert(args);
+          case "list_monitors": return await this.listMonitors(args);
+          case "get_monitor": return await this.getMonitor(args);
+          case "get_monitor_history": return await this.getMonitorHistory(args);
+          case "list_automations": return await this.listAutomations(args);
+          case "get_automation": return await this.getAutomation(args);
+          case "list_automation_runs": return await this.listAutomationRuns(args);
+          case "get_automation_run": return await this.getAutomationRun(args);
+          case "list_automation_schedules": return await this.listAutomationSchedules(args);
+          case "get_automation_schedule": return await this.getAutomationSchedule(args);
+          case "list_jobs": return await this.listJobs(args);
+          case "list_jobs_bulk": return await this.listJobsBulk(args);
+          case "get_job": return await this.getJob(args);
+          case "list_firmware": return await this.listFirmware(args);
+          case "get_firmware": return await this.getFirmware(args);
+          case "list_firmware_updates": return await this.listFirmwareUpdates(args);
+          case "get_firmware_update": return await this.getFirmwareUpdate(args);
+          case "list_reports": return await this.listReports(args);
+          case "get_connection_report": return await this.getConnectionReport(args);
+          case "get_alert_report": return await this.getAlertReport(args);
+          case "get_device_report": return await this.getDeviceReport(args);
+          case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
+          case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
+          case "list_templates": return await this.listTemplates(args);
+          case "get_template": return await this.getTemplate(args);
+          case "list_health_configs": return await this.listHealthConfigs(args);
+          case "get_health_config": return await this.getHealthConfig(args);
+          case "list_events": return await this.listEvents(args);
+          case "list_events_bulk": return await this.listEventsBulk(args);
+          case "list_users": return await this.listUsers(args);
+          case "get_user": return await this.getUser(args);
+          case "list_files": return await this.listFiles(args);
+          case "get_file": return await this.getFile(args);
+          case "get_account_info": return await this.getAccountInfo(args);
+          case "get_account_security": return await this.getAccountSecurity(args);
+          case "get_api_info": return await this.getApiInfo(args);
+          
+          // SCI tools
+          case "sci_query_device_state": return await this.sciQueryDeviceState(args);
+          case "sci_query_device_settings": return await this.sciQueryDeviceSettings(args);
+          case "sci_query_descriptor": return await this.sciQueryDescriptor(args);
+          case "sci_query_multiple_devices": return await this.sciQueryMultipleDevices(args);
+          case "sci_list_device_files": return await this.sciListDeviceFiles(args);
+          case "sci_get_device_file": return await this.sciGetDeviceFile(args);
+          case "sci_query_firmware_targets": return await this.sciQueryFirmwareTargets(args);
+          case "sci_get_job_status": return await this.sciGetJobStatus(args);
+          case "sci_get_data_service_file": return await this.sciGetDataServiceFile(args);
+          
+          default:
+            throw new Error(`Unknown tool: ${name}`);
+        }
+      } catch (error) {
+        if (error.response?.status === 401) {
+          return {
+            content: [{ type: "text", text: "Authentication Error: Invalid API key." }],
+            isError: true,
+          };
+        }
+        if (error.response?.status === 403) {
+          return {
+            content: [{ type: "text", text: "Permission Denied: May require Remote Manager Premier Edition." }],
+            isError: true,
+          };
+        }
+        if (error.response?.status === 404) {
+          return {
+            content: [{ type: "text", text: "Not Found: Resource does not exist." }],
+            isError: true,
+          };
+        }
+        return {
+          content: [{ type: "text", text: `Error: ${error.message}\n${error.response?.data ? JSON.stringify(error.response.data, null, 2) : ""}` }],
+          isError: true,
+        };
+      }
+    });
+  }
+
+  // ============================================
+  // DYNAMIC TOOL MANAGEMENT METHODS
+  // ============================================
+
+  discoverToolCategories() {
+    const categories = Object.values(this.toolCategories).map(cat => ({
+      name: cat.name,
+      display_name: cat.display_name,
+      description: cat.description,
+      tool_count: cat.tool_count,
+      enabled: this.enabledCategories.has(cat.name),
+      tools: cat.tools
+    }));
+
+    const summary = {
+      total_categories: categories.length,
+      enabled_categories: this.enabledCategories.size,
+      core_tools_count: this.coreTools.length,
+      categories: categories
+    };
+
+    return this.formatResponse(summary);
+  }
+
+  enableToolCategory(args) {
+    const { category } = args;
+
+    if (!this.toolCategories[category]) {
+      return {
+        content: [{ type: "text", text: `Error: Unknown category '${category}'. Use discover_tool_categories to see available categories.` }],
+        isError: true
+      };
+    }
+
+    if (this.enabledCategories.has(category)) {
+      return this.formatResponse({
+        message: `Category '${category}' is already enabled`,
+        category: this.toolCategories[category].display_name,
+        tools_count: this.toolCategories[category].tool_count
+      });
+    }
+
+    this.enabledCategories.add(category);
+
+    return this.formatResponse({
+      message: `Successfully enabled category: ${this.toolCategories[category].display_name}`,
+      category: category,
+      tools_enabled: this.toolCategories[category].tools,
+      tools_count: this.toolCategories[category].tool_count,
+      total_enabled_tools: this.getEnabledTools().length
+    });
+  }
+
+  getEnabledTools() {
+    // Always include core tools
+    const enabled = this.allTools.filter(tool => this.coreTools.includes(tool.name));
+
+    // Add tools from enabled categories
+    for (const category of this.enabledCategories) {
+      const catTools = this.toolCategories[category].tools;
+      enabled.push(...this.allTools.filter(tool => catTools.includes(tool.name)));
+    }
+
+    return enabled;
+  }
+
+  defineAllTools() {
+    // Define all 62 tools (60 original + 2 management tools)
+    this.allTools = [
+        // ============================================
+        // TOOL MANAGEMENT
+        // ============================================
+        {
+          name: "discover_tool_categories",
+          description: "Discover available tool categories and their status. Shows all tool categories that can be dynamically loaded, including descriptions, tool counts, and whether each category is currently enabled. Use this first to see what additional tools are available beyond the core toolset.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+        {
+          name: "enable_tool_category",
+          description: "Enable a category of tools to make them available for use. This dynamically loads additional tools grouped by functionality (e.g., 'reports', 'sci', 'bulk_operations'). Once enabled, all tools in that category become available. Use discover_tool_categories first to see available categories.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              category: {
+                type: "string",
+                description: "Category name to enable (e.g., 'reports', 'sci', 'bulk_operations', 'firmware', 'automations', 'admin', 'jobs', 'monitors', 'events', 'advanced_data')"
+              },
+            },
+            required: ["category"],
+          },
+        },
+
         // ============================================
         // DEVICES - Device Inventory Management
         // ============================================
@@ -1045,105 +1347,7 @@ class DigiRemoteManagerServer {
             required: ["file_path"],
           },
         },
-      ],
-    }));
-
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      try {
-        const { name, arguments: args } = request.params;
-
-        switch (name) {
-          // Original tools
-          case "list_devices": return await this.listDevices(args);
-          case "list_devices_bulk": return await this.listDevicesBulk(args);
-          case "get_device": return await this.getDevice(args);
-          case "list_streams": return await this.listStreams(args);
-          case "list_streams_bulk": return await this.listStreamsBulk(args);
-          case "get_stream": return await this.getStream(args);
-          case "get_stream_history": return await this.getStreamHistory(args);
-          case "get_stream_history_bulk": return await this.getStreamHistoryBulk(args);
-          case "get_stream_rollups": return await this.getStreamRollups(args);
-          case "get_stream_rollups_bulk": return await this.getStreamRollupsBulk(args);
-          case "get_device_logs": return await this.getDeviceLogs(args);
-          case "list_groups": return await this.listGroups(args);
-          case "get_group": return await this.getGroup(args);
-          case "list_alerts": return await this.listAlerts(args);
-          case "get_alert": return await this.getAlert(args);
-          case "list_monitors": return await this.listMonitors(args);
-          case "get_monitor": return await this.getMonitor(args);
-          case "get_monitor_history": return await this.getMonitorHistory(args);
-          case "list_automations": return await this.listAutomations(args);
-          case "get_automation": return await this.getAutomation(args);
-          case "list_automation_runs": return await this.listAutomationRuns(args);
-          case "get_automation_run": return await this.getAutomationRun(args);
-          case "list_automation_schedules": return await this.listAutomationSchedules(args);
-          case "get_automation_schedule": return await this.getAutomationSchedule(args);
-          case "list_jobs": return await this.listJobs(args);
-          case "list_jobs_bulk": return await this.listJobsBulk(args);
-          case "get_job": return await this.getJob(args);
-          case "list_firmware": return await this.listFirmware(args);
-          case "get_firmware": return await this.getFirmware(args);
-          case "list_firmware_updates": return await this.listFirmwareUpdates(args);
-          case "get_firmware_update": return await this.getFirmwareUpdate(args);
-          case "list_reports": return await this.listReports(args);
-          case "get_connection_report": return await this.getConnectionReport(args);
-          case "get_alert_report": return await this.getAlertReport(args);
-          case "get_device_report": return await this.getDeviceReport(args);
-          case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
-          case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
-          case "list_templates": return await this.listTemplates(args);
-          case "get_template": return await this.getTemplate(args);
-          case "list_health_configs": return await this.listHealthConfigs(args);
-          case "get_health_config": return await this.getHealthConfig(args);
-          case "list_events": return await this.listEvents(args);
-          case "list_events_bulk": return await this.listEventsBulk(args);
-          case "list_users": return await this.listUsers(args);
-          case "get_user": return await this.getUser(args);
-          case "list_files": return await this.listFiles(args);
-          case "get_file": return await this.getFile(args);
-          case "get_account_info": return await this.getAccountInfo(args);
-          case "get_account_security": return await this.getAccountSecurity(args);
-          case "get_api_info": return await this.getApiInfo(args);
-          
-          // SCI tools
-          case "sci_query_device_state": return await this.sciQueryDeviceState(args);
-          case "sci_query_device_settings": return await this.sciQueryDeviceSettings(args);
-          case "sci_query_descriptor": return await this.sciQueryDescriptor(args);
-          case "sci_query_multiple_devices": return await this.sciQueryMultipleDevices(args);
-          case "sci_list_device_files": return await this.sciListDeviceFiles(args);
-          case "sci_get_device_file": return await this.sciGetDeviceFile(args);
-          case "sci_query_firmware_targets": return await this.sciQueryFirmwareTargets(args);
-          case "sci_get_job_status": return await this.sciGetJobStatus(args);
-          case "sci_get_data_service_file": return await this.sciGetDataServiceFile(args);
-          
-          default:
-            throw new Error(`Unknown tool: ${name}`);
-        }
-      } catch (error) {
-        if (error.response?.status === 401) {
-          return {
-            content: [{ type: "text", text: "Authentication Error: Invalid API key." }],
-            isError: true,
-          };
-        }
-        if (error.response?.status === 403) {
-          return {
-            content: [{ type: "text", text: "Permission Denied: May require Remote Manager Premier Edition." }],
-            isError: true,
-          };
-        }
-        if (error.response?.status === 404) {
-          return {
-            content: [{ type: "text", text: "Not Found: Resource does not exist." }],
-            isError: true,
-          };
-        }
-        return {
-          content: [{ type: "text", text: `Error: ${error.message}\n${error.response?.data ? JSON.stringify(error.response.data, null, 2) : ""}` }],
-          isError: true,
-        };
-      }
-    });
+    ];
   }
 
   // ============================================
@@ -1732,13 +1936,17 @@ async run() {
     });
     
     app.get('/health', (req, res) => {
-      res.json({ 
-        status: 'ok', 
+      res.json({
+        status: 'ok',
         server: 'digi-remote-manager-mcp',
-        version: '2.0.0',
+        version: '3.0.0',
         transport: 'streamable-http',
         endpoint: '/mcp',
-        tools: 60
+        dynamic_tools: true,
+        core_tools: this.coreTools.length,
+        total_tools: this.allTools.length,
+        categories: Object.keys(this.toolCategories).length,
+        enabled_categories: this.enabledCategories.size
       });
     });
     

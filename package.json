@@ -1,7 +1,7 @@
 {
   "name": "digi-remote-manager-mcp-server",
-  "version": "1.0.0",
-  "description": "MCP server for Digi Remote Manager API integration",
+  "version": "3.0.0",
+  "description": "MCP server for Digi Remote Manager API integration with dynamic tool loading",
   "type": "module",
   "main": "drm-mcp-server.js",
   "bin": {
