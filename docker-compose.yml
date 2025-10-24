@@ -24,6 +24,10 @@ services:
     ports:
       - "3000:3000"
     
+    # Network configuration
+    networks:
+      - root_default
+      
     # Restart policy
     restart: unless-stopped
     
