@@ -55,3 +55,8 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+
+# Define external network
+networks:
+  root_default:
+    external: true
