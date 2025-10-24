@@ -51,3 +51,13 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+
+    # Connect to existing Docker network
+    networks:
+      - root_default
+
+# Network configuration
+networks:
+  root_default:
+    external: true
+    name: root_default

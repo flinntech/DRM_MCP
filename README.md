@@ -94,7 +94,9 @@ MCP_TRANSPORT=http MCP_PORT=3000 npm start
 
 ## Docker Deployment
 
-### Using Docker Compose
+The server is configured to connect to the `root_default` Docker network, allowing integration with n8n and other services.
+
+### Quick Start with Docker Compose
 
 1. Configure environment variables in `.env`:
 
@@ -103,23 +105,40 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
-2. Start the server:
+2. Verify the Docker network exists:
+
+```bash
+docker network ls | grep root_default
+# Or create it if needed: docker network create root_default
+```
+
+3. Start the server:
 
 ```bash
 docker-compose up -d
 ```
 
-3. Check logs:
+4. Check logs:
 
 ```bash
 docker-compose logs -f
 ```
 
-4. Health check:
+5. Health check:
 
 ```bash
 curl http://localhost:3000/health
 ```
+
+### Accessing from n8n
+
+If your n8n is on the `root_default` network, use the container name:
+
+```
+http://drm-mcp-server:3000/mcp
+```
+
+See **[DOCKER_NETWORK_SETUP.md](./DOCKER_NETWORK_SETUP.md)** for detailed Docker networking configuration and troubleshooting.
 
 ### Manual Docker Build
 
