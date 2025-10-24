@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Digi Remote Manager MCP Server - Enhanced Version with SCI Support
+ * Digi Remote Manager MCP Server - Multi-Tenant Version
  * Full API coverage with 60+ tools including SCI/RCI operations
+ * Supports multiple users with individual DRM API credentials
  */
 
 import dotenv from "dotenv";
@@ -14,50 +15,71 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
+import { AsyncLocalStorage } from "async_hooks";
+import fs from "fs";
 
 // Load environment variables from .env file
 dotenv.config();
 
 const DRM_BASE_URL = "https://remotemanager.digi.com/ws";
 
+// AsyncLocalStorage for tracking current user context
+const userContext = new AsyncLocalStorage();
+
 // ============================================
-// CONFIGURATION - Load from environment variables
+// MULTI-TENANT CONFIGURATION
 // ============================================
+// Support both single-tenant (env vars) and multi-tenant (credentials.json)
 const API_KEY_ID = process.env.DRM_API_KEY_ID;
 const API_KEY_SECRET = process.env.DRM_API_KEY_SECRET;
+
+// Load multi-tenant credentials from credentials.json if it exists
+let USER_CREDENTIALS = {};
+try {
+  if (fs.existsSync('./credentials.json')) {
+    USER_CREDENTIALS = JSON.parse(fs.readFileSync('./credentials.json', 'utf8'));
+    console.error(`✓ Loaded credentials for ${Object.keys(USER_CREDENTIALS).length} users from credentials.json`);
+  }
+} catch (error) {
+  console.error('⚠ Warning: Could not load credentials.json:', error.message);
+}
 // ============================================
 
 class DigiRemoteManagerServer {
   constructor() {
-    if (!API_KEY_ID || !API_KEY_SECRET) {
+    // Check if we have either single-tenant or multi-tenant credentials
+    const hasMultiTenant = Object.keys(USER_CREDENTIALS).length > 0;
+    const hasSingleTenant = API_KEY_ID && API_KEY_SECRET;
+
+    if (!hasMultiTenant && !hasSingleTenant) {
       console.error("╔════════════════════════════════════════════════════════════╗");
       console.error("║  ERROR: API credentials not configured                    ║");
       console.error("╚════════════════════════════════════════════════════════════╝");
       console.error("");
-      console.error("Please set the following environment variables:");
+      console.error("Multi-tenant mode: Create credentials.json with user credentials");
+      console.error("Single-tenant mode: Set environment variables:");
       console.error("  - DRM_API_KEY_ID");
       console.error("  - DRM_API_KEY_SECRET");
       console.error("");
-      console.error("You can set them in a .env file or export them in your shell.");
-      console.error("See .env.example for reference.");
+      console.error("See credentials.json.example or .env.example for reference.");
       console.error("");
       process.exit(1);
     }
 
-    this.axiosClient = axios.create({
-      baseURL: DRM_BASE_URL,
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-API-KEY-ID": API_KEY_ID,
-        "X-API-KEY-SECRET": API_KEY_SECRET,
-      },
-    });
+    // Store default credentials for single-tenant mode
+    this.defaultCredentials = hasSingleTenant ? {
+      api_key_id: API_KEY_ID,
+      api_key_secret: API_KEY_SECRET
+    } : null;
 
-    console.error("✓ DRM MCP Server initialized with API Key authentication");
+    if (hasMultiTenant) {
+      console.error(`✓ Multi-tenant mode: ${Object.keys(USER_CREDENTIALS).length} users configured`);
+    } else {
+      console.error("✓ Single-tenant mode: Using environment variable credentials");
+    }
 
-    // Dynamic tool management: track enabled categories
-    this.enabledCategories = new Set();
+    // Dynamic tool management: track enabled categories per user
+    this.enabledCategories = new Map(); // userId -> Set of enabled categories
 
     // Define tool categories
     this.initializeToolCategories();
@@ -76,6 +98,56 @@ class DigiRemoteManagerServer {
 
     this.setupHandlers();
     console.error("✓ Dynamic tool loading enabled - use 'discover_tool_categories' to see available categories");
+  }
+
+  // ============================================
+  // MULTI-TENANT HELPER METHODS
+  // ============================================
+
+  getCurrentUserId() {
+    // Get userId from AsyncLocalStorage context, or return 'default' for single-tenant
+    const userId = userContext.getStore()?.userId;
+    return userId || 'default';
+  }
+
+  getUserCredentials(userId) {
+    // Try to get credentials from multi-tenant config
+    if (USER_CREDENTIALS[userId]) {
+      return USER_CREDENTIALS[userId];
+    }
+
+    // Fall back to default credentials for single-tenant mode
+    if (this.defaultCredentials) {
+      return this.defaultCredentials;
+    }
+
+    throw new Error(`No credentials found for user: ${userId}`);
+  }
+
+  getAxiosClient(userId = null) {
+    // Get userId from parameter or context
+    const effectiveUserId = userId || this.getCurrentUserId();
+
+    // Get credentials for this user
+    const credentials = this.getUserCredentials(effectiveUserId);
+
+    // Create and return axios client with user-specific credentials
+    return axios.create({
+      baseURL: DRM_BASE_URL,
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-API-KEY-ID": credentials.api_key_id,
+        "X-API-KEY-SECRET": credentials.api_key_secret,
+      },
+    });
+  }
+
+  getUserEnabledCategories(userId) {
+    if (!this.enabledCategories.has(userId)) {
+      this.enabledCategories.set(userId, new Set());
+    }
+    return this.enabledCategories.get(userId);
   }
 
   initializeToolCategories() {
@@ -286,18 +358,21 @@ class DigiRemoteManagerServer {
   // ============================================
 
   discoverToolCategories() {
+    const userId = this.getCurrentUserId();
+    const userCategories = this.getUserEnabledCategories(userId);
+
     const categories = Object.values(this.toolCategories).map(cat => ({
       name: cat.name,
       display_name: cat.display_name,
       description: cat.description,
       tool_count: cat.tool_count,
-      enabled: this.enabledCategories.has(cat.name),
+      enabled: userCategories.has(cat.name),
       tools: cat.tools
     }));
 
     const summary = {
       total_categories: categories.length,
-      enabled_categories: this.enabledCategories.size,
+      enabled_categories: userCategories.size,
       core_tools_count: this.coreTools.length,
       categories: categories
     };
@@ -307,6 +382,8 @@ class DigiRemoteManagerServer {
 
   enableToolCategory(args) {
     const { category } = args;
+    const userId = this.getCurrentUserId();
+    const userCategories = this.getUserEnabledCategories(userId);
 
     if (!this.toolCategories[category]) {
       return {
@@ -315,7 +392,7 @@ class DigiRemoteManagerServer {
       };
     }
 
-    if (this.enabledCategories.has(category)) {
+    if (userCategories.has(category)) {
       return this.formatResponse({
         message: `Category '${category}' is already enabled`,
         category: this.toolCategories[category].display_name,
@@ -323,7 +400,7 @@ class DigiRemoteManagerServer {
       });
     }
 
-    this.enabledCategories.add(category);
+    userCategories.add(category);
 
     return this.formatResponse({
       message: `Successfully enabled category: ${this.toolCategories[category].display_name}`,
@@ -335,11 +412,14 @@ class DigiRemoteManagerServer {
   }
 
   getEnabledTools() {
+    const userId = this.getCurrentUserId();
+    const userCategories = this.getUserEnabledCategories(userId);
+
     // Always include core tools
     const enabled = this.allTools.filter(tool => this.coreTools.includes(tool.name));
 
-    // Add tools from enabled categories
-    for (const category of this.enabledCategories) {
+    // Add tools from enabled categories for this user
+    for (const category of userCategories) {
       const catTools = this.toolCategories[category].tools;
       enabled.push(...this.allTools.filter(tool => catTools.includes(tool.name)));
     }
@@ -1408,7 +1488,7 @@ class DigiRemoteManagerServer {
   }
 
   async sendSciRequest(xmlRequest) {
-    const response = await this.axiosClient.post('/sci', xmlRequest, {
+    const response = await this.getAxiosClient().post('/sci', xmlRequest, {
       headers: {
         'Content-Type': 'text/xml',
         'Accept': 'text/xml',
@@ -1423,286 +1503,286 @@ class DigiRemoteManagerServer {
 
   async listDevices(args) {
     const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
-    const response = await this.axiosClient.get("/v1/devices/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/devices/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async listDevicesBulk(args) {
     const params = this.buildParams(args, ["query", "fields", "orderby"]);
-    const response = await this.axiosClient.get("/v1/devices/bulk", { params });
+    const response = await this.getAxiosClient().get("/v1/devices/bulk", { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getDevice(args) {
-    const response = await this.axiosClient.get(`/v1/devices/inventory/${args.device_id}`);
+    const response = await this.getAxiosClient().get(`/v1/devices/inventory/${args.device_id}`);
     return this.formatResponse(response.data);
   }
 
   async listStreams(args) {
     const params = this.buildParams(args, ["query", "size", "cursor", "orderby", "category"]);
-    const response = await this.axiosClient.get("/v1/streams/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/streams/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async listStreamsBulk(args) {
     const params = this.buildParams(args, ["query", "fields", "orderby"]);
-    const response = await this.axiosClient.get("/v1/streams/bulk", { params });
+    const response = await this.getAxiosClient().get("/v1/streams/bulk", { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getStream(args) {
-    const response = await this.axiosClient.get(`/v1/streams/inventory/${args.stream_id}`);
+    const response = await this.getAxiosClient().get(`/v1/streams/inventory/${args.stream_id}`);
     return this.formatResponse(response.data);
   }
 
   async getStreamHistory(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "size", "cursor", "order"]);
-    const response = await this.axiosClient.get(`/v1/streams/history/${args.stream_id}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/streams/history/${args.stream_id}`, { params });
     return this.formatResponse(response.data);
   }
 
   async getStreamHistoryBulk(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "fields", "order"]);
-    const response = await this.axiosClient.get(`/v1/streams/bulk/history/${args.stream_id}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/streams/bulk/history/${args.stream_id}`, { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getStreamRollups(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "interval", "method", "size", "cursor"]);
-    const response = await this.axiosClient.get(`/v1/streams/rollups/${args.stream_id}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/streams/rollups/${args.stream_id}`, { params });
     return this.formatResponse(response.data);
   }
 
   async getStreamRollupsBulk(args) {
     const params = this.buildParams(args, ["interval", "method"]);
-    const response = await this.axiosClient.get(`/v1/streams/bulk/rollups/${args.stream_id}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/streams/bulk/rollups/${args.stream_id}`, { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getDeviceLogs(args) {
     const params = this.buildParams(args, ["start_time", "size"]);
-    const response = await this.axiosClient.get(`/v1/device_logs/inventory/${args.device_id}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/device_logs/inventory/${args.device_id}`, { params });
     return this.formatResponse(response.data);
   }
 
   async listGroups(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/groups/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/groups/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getGroup(args) {
-    const response = await this.axiosClient.get(`/v1/groups/inventory/${args.group_id}`);
+    const response = await this.getAxiosClient().get(`/v1/groups/inventory/${args.group_id}`);
     return this.formatResponse(response.data);
   }
 
   async listAlerts(args) {
     const params = this.buildParams(args, ["query", "size", "orderby"]);
-    const response = await this.axiosClient.get("/v1/alerts/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/alerts/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAlert(args) {
-    const response = await this.axiosClient.get(`/v1/alerts/inventory/${args.alert_id}`);
+    const response = await this.getAxiosClient().get(`/v1/alerts/inventory/${args.alert_id}`);
     return this.formatResponse(response.data);
   }
 
   async listMonitors(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/monitors/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/monitors/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getMonitor(args) {
-    const response = await this.axiosClient.get(`/v1/monitors/inventory/${args.monitor_id}`);
+    const response = await this.getAxiosClient().get(`/v1/monitors/inventory/${args.monitor_id}`);
     return this.formatResponse(response.data);
   }
 
   async getMonitorHistory(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "size"]);
-    const response = await this.axiosClient.get(`/v1/monitors/history/${args.monitor_id}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/monitors/history/${args.monitor_id}`, { params });
     return this.formatResponse(response.data);
   }
 
   async listAutomations(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/automations/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/automations/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAutomation(args) {
-    const response = await this.axiosClient.get(`/v1/automations/inventory/${args.automation_id}`);
+    const response = await this.getAxiosClient().get(`/v1/automations/inventory/${args.automation_id}`);
     return this.formatResponse(response.data);
   }
 
   async listAutomationRuns(args) {
     const params = this.buildParams(args, ["query", "size", "orderby"]);
-    const response = await this.axiosClient.get("/v1/automations/runs/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/automations/runs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAutomationRun(args) {
-    const response = await this.axiosClient.get(`/v1/automations/runs/inventory/${args.run_id}`);
+    const response = await this.getAxiosClient().get(`/v1/automations/runs/inventory/${args.run_id}`);
     return this.formatResponse(response.data);
   }
 
   async listAutomationSchedules(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/automations/schedules/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/automations/schedules/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getAutomationSchedule(args) {
-    const response = await this.axiosClient.get(`/v1/automations/schedules/inventory/${args.schedule_id}`);
+    const response = await this.getAxiosClient().get(`/v1/automations/schedules/inventory/${args.schedule_id}`);
     return this.formatResponse(response.data);
   }
 
   async listJobs(args) {
     const params = this.buildParams(args, ["query", "size", "cursor", "orderby"]);
-    const response = await this.axiosClient.get("/v1/jobs/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/jobs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async listJobsBulk(args) {
     const params = this.buildParams(args, ["query", "fields"]);
-    const response = await this.axiosClient.get("/v1/jobs/bulk", { params });
+    const response = await this.getAxiosClient().get("/v1/jobs/bulk", { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async getJob(args) {
-    const response = await this.axiosClient.get(`/v1/jobs/inventory/${args.job_id}`);
+    const response = await this.getAxiosClient().get(`/v1/jobs/inventory/${args.job_id}`);
     return this.formatResponse(response.data);
   }
 
   async listFirmware(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/firmware/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/firmware/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getFirmware(args) {
-    const response = await this.axiosClient.get(`/v1/firmware/inventory/${args.firmware_id}`);
+    const response = await this.getAxiosClient().get(`/v1/firmware/inventory/${args.firmware_id}`);
     return this.formatResponse(response.data);
   }
 
   async listFirmwareUpdates(args) {
     const params = this.buildParams(args, ["query", "size", "orderby"]);
-    const response = await this.axiosClient.get("/v1/firmware_updates/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/firmware_updates/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getFirmwareUpdate(args) {
-    const response = await this.axiosClient.get(`/v1/firmware_updates/inventory/${args.update_id}`);
+    const response = await this.getAxiosClient().get(`/v1/firmware_updates/inventory/${args.update_id}`);
     return this.formatResponse(response.data);
   }
 
   async listReports() {
-    const response = await this.axiosClient.get("/v1/reports");
+    const response = await this.getAxiosClient().get("/v1/reports");
     return this.formatResponse(response.data);
   }
 
   async getConnectionReport(args) {
     const params = this.buildParams(args, ["query", "group"]);
-    const response = await this.axiosClient.get("/v1/reports/connections", { params });
+    const response = await this.getAxiosClient().get("/v1/reports/connections", { params });
     return this.formatResponse(response.data);
   }
 
   async getAlertReport(args) {
     const params = this.buildParams(args, ["query", "start_time", "end_time"]);
-    const response = await this.axiosClient.get("/v1/reports/alerts", { params });
+    const response = await this.getAxiosClient().get("/v1/reports/alerts", { params });
     return this.formatResponse(response.data);
   }
 
   async getDeviceReport(args) {
     const params = this.buildParams(args, ["query", "group", "scope"]);
-    const response = await this.axiosClient.get(`/v1/reports/devices/${args.report_type}`, { params });
+    const response = await this.getAxiosClient().get(`/v1/reports/devices/${args.report_type}`, { params });
     return this.formatResponse(response.data);
   }
 
   async getCellularUtilizationReport(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "query"]);
-    const response = await this.axiosClient.get("/v1/reports/cellular_utilization", { params });
+    const response = await this.getAxiosClient().get("/v1/reports/cellular_utilization", { params });
     return this.formatResponse(response.data);
   }
 
   async getDeviceAvailabilityReport(args) {
     const params = this.buildParams(args, ["start_time", "end_time", "query"]);
-    const response = await this.axiosClient.get("/v1/reports/device_availability", { params });
+    const response = await this.getAxiosClient().get("/v1/reports/device_availability", { params });
     return this.formatResponse(response.data);
   }
 
   async listTemplates(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/configs/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/configs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getTemplate(args) {
-    const response = await this.axiosClient.get(`/v1/configs/inventory/${args.config_id}`);
+    const response = await this.getAxiosClient().get(`/v1/configs/inventory/${args.config_id}`);
     return this.formatResponse(response.data);
   }
 
   async listHealthConfigs(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/health_configs/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/health_configs/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getHealthConfig(args) {
-    const response = await this.axiosClient.get(`/v1/health_configs/inventory/${args.health_config_id}`);
+    const response = await this.getAxiosClient().get(`/v1/health_configs/inventory/${args.health_config_id}`);
     return this.formatResponse(response.data);
   }
 
   async listEvents(args) {
     const params = this.buildParams(args, ["query", "start_time", "end_time", "size"]);
-    const response = await this.axiosClient.get("/v1/events/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/events/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async listEventsBulk(args) {
     const params = this.buildParams(args, ["query", "start_time", "end_time", "fields"]);
-    const response = await this.axiosClient.get("/v1/events/bulk", { params });
+    const response = await this.getAxiosClient().get("/v1/events/bulk", { params });
     return { content: [{ type: "text", text: response.data }] };
   }
 
   async listUsers(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/users/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/users/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getUser(args) {
-    const response = await this.axiosClient.get(`/v1/users/inventory/${args.user_id}`);
+    const response = await this.getAxiosClient().get(`/v1/users/inventory/${args.user_id}`);
     return this.formatResponse(response.data);
   }
 
   async listFiles(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
-    const response = await this.axiosClient.get("/v1/files/inventory", { params });
+    const response = await this.getAxiosClient().get("/v1/files/inventory", { params });
     return this.formatResponse(response.data);
   }
 
   async getFile(args) {
-    const response = await this.axiosClient.get(`/v1/files/inventory/${args.file_id}`);
+    const response = await this.getAxiosClient().get(`/v1/files/inventory/${args.file_id}`);
     return this.formatResponse(response.data);
   }
 
   async getAccountInfo() {
-    const response = await this.axiosClient.get("/v1/account");
+    const response = await this.getAxiosClient().get("/v1/account");
     return this.formatResponse(response.data);
   }
 
   async getAccountSecurity(args) {
     const params = {};
     if (args.system_defaults) params.system_defaults = "true";
-    const response = await this.axiosClient.get("/v1/account/current/security", { params });
+    const response = await this.getAxiosClient().get("/v1/account/current/security", { params });
     return this.formatResponse(response.data);
   }
 
   async getApiInfo(args) {
     const endpoint = args.endpoint || "";
     const url = endpoint ? `/v1/${endpoint}` : "/v1";
-    const response = await this.axiosClient.get(url);
+    const response = await this.getAxiosClient().get(url);
     return this.formatResponse(response.data);
   }
 
@@ -1849,7 +1929,7 @@ class DigiRemoteManagerServer {
     const { job_id } = args;
     
     // For SCI async jobs, poll via HTTP GET
-    const response = await this.axiosClient.get(`/sci/${job_id}`, {
+    const response = await this.getAxiosClient().get(`/sci/${job_id}`, {
       headers: { 'Accept': 'text/xml' }
     });
     return { content: [{ type: "text", text: response.data }] };
@@ -1901,30 +1981,36 @@ async run() {
     app.use(cors({
       origin: '*',
       methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
-      allowedHeaders: ['Content-Type', 'Accept', 'Mcp-Session-Id', 'Last-Event-ID'],
+      allowedHeaders: ['Content-Type', 'Accept', 'Mcp-Session-Id', 'Last-Event-ID', 'X-User-ID'],
       exposedHeaders: ['Mcp-Session-Id']
     }));
     app.use(express.json());
     
     app.all('/mcp', async (req, res) => {
-      console.error(`${req.method} /mcp - Request received`);
-      
+      // Extract user_id from header (defaults to 'default' for single-tenant mode)
+      const userId = req.headers['x-user-id'] || 'default';
+
+      console.error(`${req.method} /mcp - Request received (user: ${userId})`);
+
       try {
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: undefined,
-          enableJsonResponse: true
+        // Run the request in the context of this userId using AsyncLocalStorage
+        await userContext.run({ userId }, async () => {
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+            enableJsonResponse: true
+          });
+
+          res.on('close', () => {
+            transport.close();
+          });
+
+          await this.server.connect(transport);
+          await transport.handleRequest(req, res, req.body);
         });
-        
-        res.on('close', () => {
-          transport.close();
-        });
-        
-        await this.server.connect(transport);
-        await transport.handleRequest(req, res, req.body);
-        
-        console.error(`${req.method} /mcp - Request handled successfully`);
+
+        console.error(`${req.method} /mcp - Request handled successfully (user: ${userId})`);
       } catch (error) {
-        console.error('Error handling MCP request:', error);
+        console.error(`Error handling MCP request for user ${userId}:`, error);
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: '2.0',
@@ -1936,17 +2022,21 @@ async run() {
     });
     
     app.get('/health', (req, res) => {
+      const hasMultiTenant = Object.keys(USER_CREDENTIALS).length > 0;
+
       res.json({
         status: 'ok',
         server: 'digi-remote-manager-mcp',
         version: '3.0.0',
         transport: 'streamable-http',
         endpoint: '/mcp',
+        multi_tenant: hasMultiTenant,
+        configured_users: hasMultiTenant ? Object.keys(USER_CREDENTIALS).length : 1,
         dynamic_tools: true,
         core_tools: this.coreTools.length,
         total_tools: this.allTools.length,
         categories: Object.keys(this.toolCategories).length,
-        enabled_categories: this.enabledCategories.size
+        active_users: this.enabledCategories.size
       });
     });
     

@@ -4,6 +4,7 @@ Model Context Protocol (MCP) server for Digi Remote Manager API integration. Pro
 
 ## Features
 
+- **Multi-Tenant Support**: Single or multi-user mode with per-user credentials and isolated state
 - **Dynamic Tool Loading**: Reduces initial context by ~70% - only loads tools you need
 - **62 API Tools**: Full coverage of Digi Remote Manager REST API (13 core + 49 on-demand)
 - **SCI/RCI Support**: Direct device communication via Server Command Interface
@@ -91,6 +92,62 @@ npm start
 ```bash
 MCP_TRANSPORT=http MCP_PORT=3000 npm start
 ```
+
+## Multi-Tenant Configuration
+
+The server supports two modes:
+
+### Single-Tenant Mode (Default)
+
+Use environment variables for a single set of credentials:
+
+```env
+DRM_API_KEY_ID=your_api_key_id_here
+DRM_API_KEY_SECRET=your_api_key_secret_here
+```
+
+All requests will use these credentials.
+
+### Multi-Tenant Mode
+
+For multiple users with different DRM credentials:
+
+1. Create `credentials.json` in the project root:
+
+```json
+{
+  "user1": {
+    "api_key_id": "user1_key_id",
+    "api_key_secret": "user1_key_secret"
+  },
+  "user2": {
+    "api_key_id": "user2_key_id",
+    "api_key_secret": "user2_key_secret"
+  },
+  "alice": {
+    "api_key_id": "alice_key_id",
+    "api_key_secret": "alice_key_secret"
+  }
+}
+```
+
+2. When making HTTP requests to the MCP server, include the `X-User-ID` header:
+
+```bash
+curl -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-User-ID: alice" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+```
+
+3. Each user's credentials will be used for their requests
+4. Tool categories are tracked separately per user
+
+**Security Notes:**
+- `credentials.json` is gitignored by default
+- Store credentials securely
+- Each user gets isolated access with their own DRM API credentials
+- Per-user tool category state is maintained in memory
 
 ## Docker Deployment
 
