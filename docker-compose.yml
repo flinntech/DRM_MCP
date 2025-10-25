@@ -22,8 +22,8 @@ services:
     
     # Expose HTTP port for n8n and other clients
     ports:
-      - "3000:3000"
-    
+      - "3001:3000"
+
     # Network configuration
     networks:
       - dani_network
