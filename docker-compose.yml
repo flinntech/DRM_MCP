@@ -26,11 +26,11 @@ services:
     
     # Network configuration
     networks:
-      - root_default
-      
+      - dani_network
+
     # Restart policy
     restart: unless-stopped
-    
+
     # Resource limits (optional but recommended)
     deploy:
       resources:
@@ -40,14 +40,14 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-    
+
     # Logging configuration
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    
+
     # Health check
     healthcheck:
       test: ["CMD", "node", "-e", "process.exit(0)"]
@@ -58,5 +58,5 @@ services:
 
 # Define external network
 networks:
-  root_default:
+  dani_network:
     external: true
