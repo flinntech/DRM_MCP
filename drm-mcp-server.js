@@ -167,13 +167,7 @@ class DigiRemoteManagerServer {
         tool_count: 3,
         tools: ["get_stream_rollups", "get_stream_rollups_bulk", "get_device_logs"]
       },
-      reports: {
-        name: "reports",
-        display_name: "Reports & Analytics",
-        description: "Analytics dashboards: connection reports, alert summaries, device breakdowns, cellular usage, availability stats.",
-        tool_count: 6,
-        tools: ["list_reports", "get_connection_report", "get_alert_report", "get_device_report", "get_cellular_utilization_report", "get_device_availability_report"]
-      },
+      // reports category REMOVED - tools return stale/cached data
       automations: {
         name: "automations",
         display_name: "Automation & Workflows",
@@ -292,12 +286,7 @@ class DigiRemoteManagerServer {
           case "get_firmware": return await this.getFirmware(args);
           case "list_firmware_updates": return await this.listFirmwareUpdates(args);
           case "get_firmware_update": return await this.getFirmwareUpdate(args);
-          case "list_reports": return await this.listReports(args);
-          case "get_connection_report": return await this.getConnectionReport(args);
-          case "get_alert_report": return await this.getAlertReport(args);
-          case "get_device_report": return await this.getDeviceReport(args);
-          case "get_cellular_utilization_report": return await this.getCellularUtilizationReport(args);
-          case "get_device_availability_report": return await this.getDeviceAvailabilityReport(args);
+          // Report tools REMOVED - return stale data
           case "list_templates": return await this.listTemplates(args);
           case "get_template": return await this.getTemplate(args);
           case "list_health_configs": return await this.listHealthConfigs(args);
@@ -327,27 +316,31 @@ class DigiRemoteManagerServer {
             throw new Error(`Unknown tool: ${name}`);
         }
       } catch (error) {
+        // Only mark as isError: true for actual tool execution failures
+        // HTTP errors (401, 403, 404) are API-level errors, not tool failures
+        // The tool executed successfully, it just got an error response from the API
         if (error.response?.status === 401) {
           return {
             content: [{ type: "text", text: "Authentication Error: Invalid API key." }],
-            isError: true,
+            isError: false,  // Tool worked, API returned auth error
           };
         }
         if (error.response?.status === 403) {
           return {
             content: [{ type: "text", text: "Permission Denied: May require Remote Manager Premier Edition." }],
-            isError: true,
+            isError: false,  // Tool worked, API returned permission error
           };
         }
         if (error.response?.status === 404) {
           return {
             content: [{ type: "text", text: "Not Found: Resource does not exist." }],
-            isError: true,
+            isError: false,  // Tool worked, API returned not found
           };
         }
+        // Only mark as isError: true for actual tool/connection failures
         return {
           content: [{ type: "text", text: `Error: ${error.message}\n${error.response?.data ? JSON.stringify(error.response.data, null, 2) : ""}` }],
-          isError: true,
+          isError: true,  // Actual tool execution failure
         };
       }
     });
@@ -461,7 +454,7 @@ class DigiRemoteManagerServer {
         // ============================================
         {
           name: "list_devices",
-          description: "List devices with advanced query filtering. Returns device inventory including connection status, health, location, signal strength, and metadata. Use query parameter for powerful filtering: Examples: 'connection_status=\"connected\"' (connected devices), 'signal_percent<50' (weak signal), 'group startsWith \"/Production\"' (by group path), 'tags=\"sensor\"' (by tag), 'last_connect>-1d' (connected in last day), 'health_status=\"error\"' (unhealthy devices). Supports pagination via cursor.",
+          description: "**PRIMARY TOOL FOR DEVICE COUNTS** - List devices with advanced query filtering. This is the SOURCE OF TRUTH for accurate device counts. Returns paginated device inventory with real-time connection status, health, location, signal strength, and metadata. The response includes 'count' field (total matching devices) and 'list' array (device objects). When counting devices, ALWAYS use this tool and count items in the returned list - DO NOT rely on cached reports. Query examples: No filter (all devices), 'connection_status=\"connected\"' (online devices only), 'signal_percent<50' (weak signal), 'group startsWith \"/Production\"' (by group path), 'tags=\"sensor\"' (by tag), 'last_connect>-1d' (recently connected), 'health_status=\"error\"' (unhealthy).",
           inputSchema: {
             type: "object",
             properties: {
@@ -954,95 +947,9 @@ class DigiRemoteManagerServer {
         },
 
         // ============================================
-        // REPORTS - Analytics & Dashboards
+        // REPORTS - REMOVED (reports return stale/cached data)
+        // Use list_devices, list_alerts, etc. for accurate real-time counts
         // ============================================
-        {
-          name: "list_reports",
-          description: "List available report types in DRM. Reports provide analytics on device status, connectivity, data usage, health trends. Use to discover what reporting capabilities are available.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
-        },
-        {
-          name: "get_connection_report",
-          description: "Get connection status summary showing counts of connected vs disconnected devices, connection trends, average uptime. Useful for dashboard widgets showing fleet connectivity health at-a-glance.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { 
-                type: "string", 
-                description: "Filter devices for report (e.g., 'group startsWith \"/Production\"')" 
-              },
-              group: { 
-                type: "string", 
-                description: "Limit report to specific group path (e.g., '/Production/Building-A')" 
-              },
-            },
-          },
-        },
-        {
-          name: "get_alert_report",
-          description: "Get alert activity summary showing fired alerts, most common alert types, alert trends over time. Use for understanding alert patterns and system health.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Filter devices or alerts" },
-              start_time: { type: "string", description: "Report start time" },
-              end_time: { type: "string", description: "Report end time" },
-            },
-          },
-        },
-        {
-          name: "get_device_report",
-          description: "Get device summary report by dimension/category. Dimensions: 'health_status' (error/warning/ok counts), 'firmware_version' (version distribution), 'connection_status' (connected/disconnected), 'carrier' (cellular carrier breakdown), 'signal_percent' (signal strength distribution), 'type' (device model counts), 'vendor_id', 'restricted_status', 'compliance', 'tags'. Perfect for fleet composition analysis, compliance reports, identifying outdated firmware.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              report_type: { 
-                type: "string", 
-                description: "Dimension to report on: health_status, firmware_version, connection_status, carrier, signal_percent, type, vendor_id, restricted_status, compliance, or tags" 
-              },
-              query: { 
-                type: "string", 
-                description: "Filter devices for report" 
-              },
-              group: { 
-                type: "string", 
-                description: "Limit to group path" 
-              },
-              scope: { 
-                type: "string", 
-                description: "For cellular reports: 'primary' or 'secondary' SIM" 
-              },
-            },
-            required: ["report_type"],
-          },
-        },
-        {
-          name: "get_cellular_utilization_report",
-          description: "Get cellular data usage statistics showing bytes sent/received per device, data plan consumption, overage alerts, usage trends. Essential for managing cellular costs and data plan allocation.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_time: { type: "string", description: "Report period start" },
-              end_time: { type: "string", description: "Report period end" },
-              query: { type: "string", description: "Filter devices (e.g., 'carrier=\"AT&T\"')" },
-            },
-          },
-        },
-        {
-          name: "get_device_availability_report",
-          description: "Get device uptime/availability statistics showing percentage of time devices were connected, disconnect counts, average connection duration, availability trends. Use for SLA reporting and reliability analysis.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_time: { type: "string", description: "Report period start" },
-              end_time: { type: "string", description: "Report period end" },
-              query: { type: "string", description: "Filter devices for report" },
-            },
-          },
-        },
 
         // ============================================
         // TEMPLATES - Configuration Management
@@ -1676,40 +1583,8 @@ class DigiRemoteManagerServer {
     return this.formatResponse(response.data);
   }
 
-  async listReports() {
-    const response = await this.getAxiosClient().get("/v1/reports");
-    return this.formatResponse(response.data);
-  }
-
-  async getConnectionReport(args) {
-    const params = this.buildParams(args, ["query", "group"]);
-    const response = await this.getAxiosClient().get("/v1/reports/connections", { params });
-    return this.formatResponse(response.data);
-  }
-
-  async getAlertReport(args) {
-    const params = this.buildParams(args, ["query", "start_time", "end_time"]);
-    const response = await this.getAxiosClient().get("/v1/reports/alerts", { params });
-    return this.formatResponse(response.data);
-  }
-
-  async getDeviceReport(args) {
-    const params = this.buildParams(args, ["query", "group", "scope"]);
-    const response = await this.getAxiosClient().get(`/v1/reports/devices/${args.report_type}`, { params });
-    return this.formatResponse(response.data);
-  }
-
-  async getCellularUtilizationReport(args) {
-    const params = this.buildParams(args, ["start_time", "end_time", "query"]);
-    const response = await this.getAxiosClient().get("/v1/reports/cellular_utilization", { params });
-    return this.formatResponse(response.data);
-  }
-
-  async getDeviceAvailabilityReport(args) {
-    const params = this.buildParams(args, ["start_time", "end_time", "query"]);
-    const response = await this.getAxiosClient().get("/v1/reports/device_availability", { params });
-    return this.formatResponse(response.data);
-  }
+  // Report methods REMOVED - APIs return stale/cached data
+  // Use list_devices, list_alerts, etc. for accurate real-time data
 
   async listTemplates(args) {
     const params = this.buildParams(args, ["query", "orderby"]);
