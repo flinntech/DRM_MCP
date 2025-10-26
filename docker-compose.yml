@@ -14,15 +14,15 @@ services:
 
       # MCP Server transport configuration
       - MCP_TRANSPORT=http
-      - MCP_PORT=3000
-    
+      - MCP_PORT=3001
+
     # Since MCP uses stdio, we need to keep stdin open and allocate a tty
     stdin_open: true
     tty: true
-    
+
     # Expose HTTP port for n8n and other clients
     ports:
-      - "3001:3000"
+      - "3001:3001"
 
     # Network configuration
     networks:

@@ -1897,9 +1897,9 @@ class DigiRemoteManagerServer {
 
 async run() {
     const transportType = process.env.MCP_TRANSPORT || 'stdio';
-    
+
     if (transportType === 'http') {
-      const PORT = process.env.MCP_PORT || 3000;
+      const PORT = process.env.MCP_PORT || 3001;
       await this.startHttpServer(PORT);
     } else {
       const transport = new StdioServerTransport();
