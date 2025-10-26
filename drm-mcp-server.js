@@ -110,13 +110,28 @@ class DigiRemoteManagerServer {
     return userId || 'default';
   }
 
-  getUserCredentials(userId) {
-    // Try to get credentials from multi-tenant config
+  getCurrentMetadata() {
+    // Get metadata from AsyncLocalStorage context
+    return userContext.getStore()?.metadata || {};
+  }
+
+  getUserCredentials(userId, requestMetadata = {}) {
+    // Priority 1: Check for credentials passed in request metadata (from HTTP headers)
+    // This allows per-request user-specific credentials from the DANI agent
+    if (requestMetadata['X-DRM-API-Key-Id'] && requestMetadata['X-DRM-API-Key-Secret']) {
+      console.error(`✓ Using credentials from request metadata for user: ${requestMetadata['X-User-Id'] || userId}`);
+      return {
+        api_key_id: requestMetadata['X-DRM-API-Key-Id'],
+        api_key_secret: requestMetadata['X-DRM-API-Key-Secret']
+      };
+    }
+
+    // Priority 2: Try to get credentials from multi-tenant config
     if (USER_CREDENTIALS[userId]) {
       return USER_CREDENTIALS[userId];
     }
 
-    // Fall back to default credentials for single-tenant mode
+    // Priority 3: Fall back to default credentials for single-tenant mode
     if (this.defaultCredentials) {
       return this.defaultCredentials;
     }
@@ -124,12 +139,15 @@ class DigiRemoteManagerServer {
     throw new Error(`No credentials found for user: ${userId}`);
   }
 
-  getAxiosClient(userId = null) {
+  getAxiosClient(userId = null, requestMetadata = null) {
     // Get userId from parameter or context
     const effectiveUserId = userId || this.getCurrentUserId();
 
-    // Get credentials for this user
-    const credentials = this.getUserCredentials(effectiveUserId);
+    // Get metadata from parameter or context
+    const effectiveMetadata = requestMetadata || this.getCurrentMetadata();
+
+    // Get credentials for this user (with priority to request metadata)
+    const credentials = this.getUserCredentials(effectiveUserId, effectiveMetadata);
 
     // Create and return axios client with user-specific credentials
     return axios.create({
@@ -249,10 +267,53 @@ class DigiRemoteManagerServer {
       try {
         const { name, arguments: args } = request.params;
 
-        switch (name) {
-          // Dynamic tool management
-          case "discover_tool_categories": return this.discoverToolCategories();
-          case "enable_tool_category": return this.enableToolCategory(args);
+        // Extract metadata from request (contains user credentials from HTTP headers)
+        const requestMetadata = request._meta || {};
+
+        // Store metadata in async local storage for access in all methods
+        return await userContext.run({ userId: requestMetadata['X-User-Id'], metadata: requestMetadata }, async () => {
+          return await this.handleToolCall(name, args, requestMetadata);
+        });
+      } catch (error) {
+        console.error(`Error executing tool ${request.params?.name}:`, error);
+        return {
+          content: [{
+            type: "text",
+            text: `Error: ${error.message}`
+          }],
+          isError: true
+        };
+      }
+    });
+  }
+
+  async handleToolCall(name, args, requestMetadata = {}) {
+    // Extract DANI-specific credentials from args if present
+    const daniUserId = args._dani_user_id;
+    const daniDrmKeyId = args._dani_drm_api_key_id;
+    const daniDrmKeySecret = args._dani_drm_api_key_secret;
+
+    // If DANI credentials are present, add them to metadata for getUserCredentials
+    if (daniDrmKeyId && daniDrmKeySecret) {
+      requestMetadata['X-User-Id'] = daniUserId || 'unknown';
+      requestMetadata['X-DRM-API-Key-Id'] = daniDrmKeyId;
+      requestMetadata['X-DRM-API-Key-Secret'] = daniDrmKeySecret;
+
+      // Remove these from args so they don't get passed to DRM API
+      delete args._dani_user_id;
+      delete args._dani_drm_api_key_id;
+      delete args._dani_drm_api_key_secret;
+    }
+
+    // Update context with metadata
+    const context = userContext.getStore() || {};
+    context.metadata = requestMetadata;
+
+    try {
+      switch (name) {
+        // Dynamic tool management
+        case "discover_tool_categories": return this.discoverToolCategories();
+        case "enable_tool_category": return this.enableToolCategory(args);
 
           // Original tools
           case "list_devices": return await this.listDevices(args);
@@ -343,7 +404,6 @@ class DigiRemoteManagerServer {
           isError: true,  // Actual tool execution failure
         };
       }
-    });
   }
 
   // ============================================
