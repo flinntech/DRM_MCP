@@ -13,6 +13,10 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios from "axios";
 import { AsyncLocalStorage } from "async_hooks";
@@ -92,7 +96,63 @@ class DigiRemoteManagerServer {
       {
         capabilities: {
           tools: {},
+          resources: {},
+          prompts: {},
         },
+        instructions: `# Digi Remote Manager API - Query Syntax Rules
+
+**CRITICAL: All string values in DRM queries MUST use SINGLE QUOTES ('), NOT double quotes ("")**
+
+## Query Syntax Requirements
+
+When building queries for DRM tools (list_devices, list_streams, list_alerts, etc.):
+
+### String Values
+- ✅ CORRECT: type='EX50'
+- ❌ WRONG: type="EX50"
+- ✅ CORRECT: connection_status='connected'
+- ❌ WRONG: connection_status="connected"
+
+### Escaping Single Quotes
+To include a single quote in a string value, double it:
+- ✅ CORRECT: name='Fred''s Device'
+- ❌ WRONG: name='Fred\\'s Device'
+
+### Operators
+- Equality: = (equals), <> (not equal)
+- Comparison: <, <=, >=, >
+- String matching: contains, startswith, endswith
+- Geolocation: within, outside
+- Logical: and, or, not
+- Parentheses for grouping: (condition1 or condition2) and condition3
+
+### Common Device Fields
+connection_status, health_status, type, name, mac, ip, firmware_version,
+signal_percent, group, tags, last_connect, vendor_id, customer_id
+
+### Timestamp Format
+Use relative notation for time-based queries:
+- -60m (60 minutes ago)
+- -1h (1 hour ago)
+- -1d (1 day ago)
+- -1w (1 week ago)
+- +30d (30 days in future)
+
+### Important Notes
+- All string comparisons are case-insensitive
+- Field names are case-sensitive
+- Use parentheses to control logical operation precedence
+- URL encoding is handled automatically
+
+### Example Queries
+- type='EX50'
+- connection_status='connected' and signal_percent>50
+- name contains 'router'
+- group startswith '/Production'
+- last_connect>-1d
+- (type='EX50' or type='EX15') and connection_status='connected'
+
+If you encounter query syntax errors, check that you're using single quotes for all string values.`,
       }
     );
 
@@ -241,6 +301,10 @@ class DigiRemoteManagerServer {
     this.coreTools = [
       "discover_tool_categories",
       "enable_tool_category",
+      "get_query_syntax_help",
+      "get_device_fields",
+      "get_query_examples",
+      "validate_query_syntax",
       "list_devices",
       "get_device",
       "list_streams",
@@ -285,6 +349,103 @@ class DigiRemoteManagerServer {
         };
       }
     });
+
+    // Resources handler - provides documentation and reference materials
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+      resources: [
+        {
+          uri: "drm://query-syntax-guide",
+          name: "DRM Query Language Syntax Guide",
+          description: "Complete reference for DRM API query syntax with examples",
+          mimeType: "text/markdown"
+        },
+        {
+          uri: "drm://device-fields-reference",
+          name: "Device Fields Reference",
+          description: "List of all queryable device fields with types and examples",
+          mimeType: "text/markdown"
+        }
+      ]
+    }));
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const uri = request.params.uri;
+
+      if (uri === "drm://query-syntax-guide") {
+        return {
+          contents: [{
+            uri: uri,
+            mimeType: "text/markdown",
+            text: this.getQuerySyntaxGuide()
+          }]
+        };
+      }
+
+      if (uri === "drm://device-fields-reference") {
+        return {
+          contents: [{
+            uri: uri,
+            mimeType: "text/markdown",
+            text: this.getDeviceFieldsReference()
+          }]
+        };
+      }
+
+      throw new Error(`Unknown resource: ${uri}`);
+    });
+
+    // Prompts handler - provides interactive help
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+      prompts: [
+        {
+          name: "query_help",
+          description: "Get help with DRM query language syntax",
+          arguments: []
+        },
+        {
+          name: "build_query",
+          description: "Step-by-step guide to building a DRM query",
+          arguments: [
+            {
+              name: "use_case",
+              description: "What you want to filter (e.g., 'devices by type', 'connected devices', 'weak signal')",
+              required: true
+            }
+          ]
+        }
+      ]
+    }));
+
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      if (name === "query_help") {
+        return {
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: this.getQuerySyntaxGuide()
+            }
+          }]
+        };
+      }
+
+      if (name === "build_query") {
+        const useCase = args?.use_case || "general filtering";
+        return {
+          messages: [{
+            role: "user",
+            content: {
+              type: "text",
+              text: `# Building a DRM Query for: ${useCase}\n\n${this.getBuildQueryHelp(useCase)}`
+            }
+          }]
+        };
+      }
+
+      throw new Error(`Unknown prompt: ${name}`);
+    });
   }
 
   async handleToolCall(name, args, requestMetadata = {}) {
@@ -314,6 +475,12 @@ class DigiRemoteManagerServer {
         // Dynamic tool management
         case "discover_tool_categories": return this.discoverToolCategories();
         case "enable_tool_category": return this.enableToolCategory(args);
+
+        // Query syntax help tools
+        case "get_query_syntax_help": return this.getQuerySyntaxHelpTool();
+        case "get_device_fields": return this.getDeviceFieldsTool();
+        case "get_query_examples": return this.getQueryExamplesTool(args);
+        case "validate_query_syntax": return this.validateQuerySyntaxTool(args);
 
           // Original tools
           case "list_devices": return await this.listDevices(args);
@@ -508,19 +675,63 @@ class DigiRemoteManagerServer {
             required: ["category"],
           },
         },
+        {
+          name: "get_query_syntax_help",
+          description: "Get comprehensive help with DRM query language syntax. Returns a complete guide with operators, field names, examples, and common patterns. Use this when you need to understand how to construct query strings for list_devices, list_streams, and other filtering tools. **IMPORTANT: This will remind you that string values MUST use SINGLE QUOTES, not double quotes.**",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+        {
+          name: "get_device_fields",
+          description: "Get a complete list of all queryable device fields with their data types, descriptions, and example queries. Use this when you need to know what fields are available for filtering devices or how to query specific device attributes.",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
+        {
+          name: "get_query_examples",
+          description: "Get example DRM query strings for common use cases. Provides ready-to-use query templates that you can adapt for your needs. Much faster than constructing queries from scratch.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              use_case: {
+                type: "string",
+                enum: ["filter_by_type", "filter_by_status", "filter_by_signal", "filter_by_group", "filter_by_time", "combine_filters", "all"],
+                description: "The type of query example you need. Use 'all' to see examples for all use cases."
+              },
+            },
+          },
+        },
+        {
+          name: "validate_query_syntax",
+          description: "Validate a DRM query string before using it in an API call. Performs basic syntax validation and checks for common errors like using double quotes instead of single quotes. Returns validation errors if invalid, or confirmation if valid. Use this to check queries before calling list_devices or other filtering tools.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "The query string to validate"
+              },
+            },
+            required: ["query"],
+          },
+        },
 
         // ============================================
         // DEVICES - Device Inventory Management
         // ============================================
         {
           name: "list_devices",
-          description: "**PRIMARY TOOL FOR DEVICE COUNTS** - List devices with advanced query filtering. This is the SOURCE OF TRUTH for accurate device counts. Returns paginated device inventory with real-time connection status, health, location, signal strength, and metadata. The response includes 'count' field (total matching devices) and 'list' array (device objects). When counting devices, ALWAYS use this tool and count items in the returned list - DO NOT rely on cached reports. Query examples: No filter (all devices), 'connection_status=\"connected\"' (online devices only), 'signal_percent<50' (weak signal), 'group startsWith \"/Production\"' (by group path), 'tags=\"sensor\"' (by tag), 'last_connect>-1d' (recently connected), 'health_status=\"error\"' (unhealthy).",
+          description: "**PRIMARY TOOL FOR DEVICE COUNTS** - List devices with advanced query filtering. This is the SOURCE OF TRUTH for accurate device counts. Returns paginated device inventory with real-time connection status, health, location, signal strength, and metadata. The response includes 'count' field (total matching devices) and 'list' array (device objects). When counting devices, ALWAYS use this tool and count items in the returned list - DO NOT rely on cached reports. Query examples (note SINGLE QUOTES): No filter (all devices), connection_status='connected' (online devices only), signal_percent<50 (weak signal), group startswith '/Production' (by group path), tags='sensor' (by tag), last_connect>-1d (recently connected), health_status='error' (unhealthy). **CRITICAL: Use single quotes (') not double quotes (\") for string values.**",
           inputSchema: {
             type: "object",
             properties: {
-              query: { 
-                type: "string", 
-                description: "Query filter using DRM query language. Operators: =, <>, <, <=, >, >=, startsWith, endsWith, contains, within, outside. Fields: connection_status, health_status, firmware_version, signal_percent, group, tags, type, ip, mac, last_connect, etc. Example: 'connection_status=\"disconnected\" and signal_percent<30'" 
+              query: {
+                type: "string",
+                description: "**IMPORTANT: String values MUST use SINGLE QUOTES ('), NOT double quotes (\").**\n\nQuery filter using DRM query language.\n\nOPERATORS: =, <>, <, <=, >, >=, contains, startswith, endswith, within, outside, and, or, not\n\nCOMMON FIELDS: connection_status, health_status, type, name, mac, ip, firmware_version, signal_percent, group, tags, last_connect\n\nEXAMPLES (note single quotes):\n  type='EX50'\n  connection_status='connected' and signal_percent>50\n  name contains 'router'\n  group startswith '/Production'\n  last_connect>-1d\n  tags='critical'\n\nESCAPING: Use '' to include a single quote: name='Fred''s Device'\n\nNOTE: String comparisons are case-insensitive. Use get_query_syntax_help tool for complete syntax guide."
               },
               size: { 
                 type: "number", 
@@ -543,9 +754,9 @@ class DigiRemoteManagerServer {
           inputSchema: {
             type: "object",
             properties: {
-              query: { 
-                type: "string", 
-                description: "Filter devices using query language (same as list_devices)" 
+              query: {
+                type: "string",
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings, not double quotes.**\n\nSame query syntax as list_devices. Examples: type='EX50', connection_status='connected', signal_percent>50. Use get_query_syntax_help for complete guide."
               },
               fields: { 
                 type: "string", 
@@ -578,13 +789,13 @@ class DigiRemoteManagerServer {
         // ============================================
         {
           name: "list_streams",
-          description: "List data streams (time-series telemetry channels). Streams collect device sensor data like temperature, voltage, GPS coordinates, custom metrics. Each device can have multiple streams. Filter by device using query: 'device_id=\"00000000-00000000-00409DFF-FF122B8E\"'. Stream IDs format: 'DeviceID/stream_name' (e.g., '00000000-00000000-00409DFF-FF122B8E/temperature')",
+          description: "List data streams (time-series telemetry channels). Streams collect device sensor data like temperature, voltage, GPS coordinates, custom metrics. Each device can have multiple streams. Filter by device using query with SINGLE QUOTES: device_id='00000000-00000000-00409DFF-FF122B8E'. Stream IDs format: 'DeviceID/stream_name' (e.g., '00000000-00000000-00409DFF-FF122B8E/temperature')",
           inputSchema: {
             type: "object",
             properties: {
-              query: { 
-                type: "string", 
-                description: "Filter streams. Common: 'device_id=\"...\"' (streams for device), 'description contains \"temp\"' (by description), 'stream_id startsWith \"00000000\"' (by device prefix)" 
+              query: {
+                type: "string",
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.**\n\nFilter streams. Examples: device_id='00000000-00000000-00409DFF-FF122B8E' (streams for device), description contains 'temp' (by description), stream_id startswith '00000000' (by device prefix)"
               },
               size: { 
                 type: "number", 
@@ -611,7 +822,7 @@ class DigiRemoteManagerServer {
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
+              query: { type: "string", description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Query filter using DRM syntax. Examples: type='value', name contains 'text'. See get_query_syntax_help." },
               fields: { type: "string", description: "Comma-separated field list (e.g., 'stream_id,description,data_type,units')" },
               orderby: { type: "string", description: "Sort field" },
             },
@@ -741,7 +952,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter groups. Example: 'path startsWith \"/Production\"' or 'description contains \"warehouse\"'" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter groups. Example: path startswith '/Production' or description contains 'warehouse'" 
               },
               orderby: { type: "string", description: "Sort: 'path asc' or 'name desc'" },
             },
@@ -768,9 +979,9 @@ class DigiRemoteManagerServer {
           inputSchema: {
             type: "object",
             properties: {
-              query: { 
-                type: "string", 
-                description: "Filter alerts. Examples: 'status=\"enabled\"' (active), 'severity=\"critical\"', 'description contains \"temperature\"'" 
+              query: {
+                type: "string",
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter alerts. Examples: status='enabled' (active), severity='critical', description contains 'temperature'"
               },
               size: { type: "number", description: "Results per page" },
               orderby: { type: "string", description: "Sort order" },
@@ -800,7 +1011,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter monitors. Examples: 'status=\"active\"' (running), 'type=\"http\"' (webhooks), 'description contains \"API\"'" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter monitors. Examples: status='active' (running), type='http' (webhooks), description contains 'API'" 
               },
               orderby: { type: "string", description: "Sort order" },
             },
@@ -843,7 +1054,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter automations. Examples: 'status=\"enabled\"', 'name contains \"reboot\"'" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter automations. Examples: status='enabled', name contains 'reboot'" 
               },
               orderby: { type: "string", description: "Sort order" },
             },
@@ -868,7 +1079,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter runs. Examples: 'status=\"failed\"' (failures only), 'start_time>-7d' (last week)" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter runs. Examples: status='failed' (failures only), start_time>-7d (last week)" 
               },
               size: { type: "number", description: "Results per page" },
               orderby: { type: "string", description: "Sort: 'start_time desc' for most recent" },
@@ -892,7 +1103,7 @@ class DigiRemoteManagerServer {
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
+              query: { type: "string", description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Query filter using DRM syntax. Examples: type='value', name contains 'text'. See get_query_syntax_help." },
               orderby: { type: "string", description: "Sort field" },
             },
           },
@@ -920,7 +1131,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter jobs. Examples: 'status=\"running\"' (active jobs), 'type=\"firmware_update\"', 'start_time>-1d' (today's jobs)" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter jobs. Examples: status='running' (active jobs), type='firmware_update', start_time>-1d (today's jobs)" 
               },
               size: { type: "number", description: "Results per page" },
               cursor: { type: "string", description: "Pagination cursor" },
@@ -934,7 +1145,7 @@ class DigiRemoteManagerServer {
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Query filter" },
+              query: { type: "string", description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Query filter using DRM syntax. Examples: type='value', name contains 'text'. See get_query_syntax_help." },
               fields: { type: "string", description: "Comma-separated fields to export" },
             },
           },
@@ -962,7 +1173,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter firmware. Examples: 'type=\"ConnectPort X4\"', 'version=\"1.2.3\"', 'production=true'" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter firmware. Examples: type='ConnectPort X4', version='1.2.3', production=true" 
               },
               orderby: { type: "string", description: "Sort: 'version desc' for latest first" },
             },
@@ -987,7 +1198,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter updates. Examples: 'status=\"in_progress\"', 'start_time>-7d'" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter updates. Examples: status='in_progress', start_time>-7d" 
               },
               size: { type: "number", description: "Results per page" },
               orderby: { type: "string", description: "Sort order" },
@@ -1022,7 +1233,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter templates (e.g., 'name contains \"production\"')" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter templates (e.g., name contains 'production')" 
               },
               orderby: { type: "string", description: "Sort order" },
             },
@@ -1077,7 +1288,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter events. Examples: 'facility=\"AUTHENTICATION\"' (login events), 'operation=\"UPDATE\"' (changes), 'device_id=\"...\"' (device activity), 'user_id=\"...\"' (user actions)" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter events. Examples: facility='AUTHENTICATION' (login events), operation='UPDATE' (changes), device_id='...' (device activity), user_id='...' (user actions)" 
               },
               start_time: { type: "string", description: "Start time (ISO or relative like '-7d')" },
               end_time: { type: "string", description: "End time (ISO or relative)" },
@@ -1110,7 +1321,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter users (e.g., 'status=\"active\"', 'role=\"admin\"')" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter users (e.g., status='active', role='admin')" 
               },
               orderby: { type: "string", description: "Sort order" },
             },
@@ -1139,7 +1350,7 @@ class DigiRemoteManagerServer {
             properties: {
               query: { 
                 type: "string", 
-                description: "Filter files (e.g., 'name contains \".bin\"', 'type=\"firmware\"')" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter files (e.g., name contains '.bin', type='firmware')" 
               },
               orderby: { type: "string", description: "Sort order" },
             },
@@ -1889,6 +2100,560 @@ class DigiRemoteManagerServer {
     
     const response = await this.sendSciRequest(sciRequest);
     return { content: [{ type: "text", text: response }] };
+  }
+
+  // ============================================
+  // QUERY SYNTAX HELP METHODS
+  // ============================================
+
+  getQuerySyntaxHelpTool() {
+    return this.formatResponse({
+      syntax_guide: this.getQuerySyntaxGuide()
+    });
+  }
+
+  getDeviceFieldsTool() {
+    return this.formatResponse({
+      device_fields: this.getDeviceFieldsReference()
+    });
+  }
+
+  getQueryExamplesTool(args) {
+    const useCase = args?.use_case || "all";
+    return this.formatResponse({
+      use_case: useCase,
+      examples: this.getQueryExamples(useCase)
+    });
+  }
+
+  validateQuerySyntaxTool(args) {
+    const query = args.query || "";
+    const validation = this.validateQuerySyntax(query);
+    return this.formatResponse(validation);
+  }
+
+  getQuerySyntaxGuide() {
+    return `# DRM Query Language Syntax Guide
+
+## CRITICAL RULE ⚠️
+**String values MUST use SINGLE QUOTES ('), NOT double quotes (")**
+
+### Basic Syntax
+
+#### String Values (MOST IMPORTANT)
+- ✅ CORRECT: type='EX50'
+- ❌ WRONG: type="EX50"
+- ✅ CORRECT: connection_status='connected'
+- ❌ WRONG: connection_status="connected"
+
+#### Escaping Single Quotes
+To include a single quote in a string, double it:
+- ✅ CORRECT: name='Fred''s Device'
+- ❌ WRONG: name='Fred\\'s Device'
+
+### Operators
+
+| Operator | Types | Example |
+|----------|-------|---------|
+| = | All types | type='EX50' |
+| <> | All types | connection_status<>'disconnected' |
+| <, <=, >=, > | Numbers, Timestamps | signal_percent>=50 |
+| contains | Strings, Tags | name contains 'router' |
+| startswith | Strings, Tags, Groups | group startswith '/Production' |
+| endswith | Strings, Tags | name endswith '-backup' |
+| within | Geoposition | location within [-122.5,37.5,-122.0,38.0] |
+| outside | Geoposition | location outside [-122.5,37.5,-122.0,38.0] |
+
+### Logical Operators
+- **and**: Both conditions must be true
+- **or**: Either condition must be true
+- **not**: Negates a condition
+- **Parentheses**: Group conditions for precedence
+
+Examples:
+- type='EX50' and connection_status='connected'
+- (type='EX50' or type='EX15') and signal_percent>50
+- not (health_status='error')
+
+### Timestamp Format
+Use relative notation:
+- **-Nm**: N minutes ago (e.g., -30m = 30 minutes ago)
+- **-Nh**: N hours ago (e.g., -12h = 12 hours ago)
+- **-Nd**: N days ago (e.g., -7d = 7 days ago)
+- **-Nw**: N weeks ago (e.g., -2w = 2 weeks ago)
+- **+Nd**: N days in future
+
+Examples:
+- last_connect>-1d (connected in last 24 hours)
+- last_connect<-7d (not connected in over a week)
+
+### Important Notes
+1. ⚠️ String values MUST use single quotes - this is the #1 cause of syntax errors
+2. String comparisons are case-insensitive
+3. Field names are case-sensitive
+4. Use parentheses to control operation order
+5. URL encoding is handled automatically
+
+### Complete Examples
+
+#### Filter by Device Type
+\`\`\`
+type='EX50'
+\`\`\`
+
+#### Connected Devices with Good Signal
+\`\`\`
+connection_status='connected' and signal_percent>50
+\`\`\`
+
+#### Devices in a Group
+\`\`\`
+group startswith '/Production/Region1'
+\`\`\`
+
+#### Recently Connected Devices
+\`\`\`
+last_connect>-1d
+\`\`\`
+
+#### Complex Multi-Condition Query
+\`\`\`
+(type='EX50' or type='EX15') and connection_status='connected' and signal_percent>=70 and last_connect>-12h
+\`\`\`
+
+#### Devices with Specific Tag
+\`\`\`
+tags='critical-infrastructure'
+\`\`\`
+
+#### Search by Name Pattern
+\`\`\`
+name contains 'warehouse' and connection_status='connected'
+\`\`\`
+
+### Common Mistakes to Avoid
+1. ❌ Using double quotes: type="EX50"
+2. ❌ Forgetting to escape quotes: name='Fred's Device'
+3. ❌ Wrong timestamp format: last_connect>-1day
+4. ❌ Case-sensitive field names: Type='EX50'
+
+### Quick Reference
+- Always use single quotes for strings
+- Double single quotes to escape them
+- Operators are case-sensitive (use 'contains', not 'CONTAINS')
+- Field names match API response fields
+- Test with simple queries first, then combine with 'and'/'or'`;
+  }
+
+  getDeviceFieldsReference() {
+    return `# Device Fields Reference
+
+All queryable device fields with data types and examples:
+
+## Connection & Status Fields
+
+### connection_status
+- **Type**: Enumerated String
+- **Values**: 'connected', 'disconnected'
+- **Example**: connection_status='connected'
+
+### health_status
+- **Type**: Enumerated String
+- **Values**: 'ok', 'warning', 'error', 'critical'
+- **Example**: health_status='error'
+
+### restricted_status
+- **Type**: Enumerated String
+- **Values**: 'unrestricted', 'restricted'
+- **Example**: restricted_status='unrestricted'
+
+## Device Identification Fields
+
+### id
+- **Type**: String (UUID)
+- **Format**: '00000000-00000000-00409DFF-FF122B8E'
+- **Example**: id='00000000-00000000-00409DFF-FF122B8E'
+
+### name
+- **Type**: String
+- **Operators**: =, <>, contains, startswith, endswith
+- **Example**: name contains 'router'
+
+### type
+- **Type**: String (device model)
+- **Common Values**: 'EX50', 'EX15', 'TX64', 'TX54', etc.
+- **Example**: type='EX50'
+
+### vendor_id
+- **Type**: Numeric (Hexadecimal)
+- **Example**: vendor_id=0x00409D
+
+### customer_id
+- **Type**: Numeric
+- **Example**: customer_id=12345
+
+## Network Fields
+
+### mac
+- **Type**: String (MAC address)
+- **Example**: mac='00:40:9D:FF:12:3B'
+
+### ip
+- **Type**: String (IP address)
+- **Example**: ip='192.168.1.100'
+
+### public_ip
+- **Type**: String (Public IP address)
+- **Example**: public_ip='203.0.113.42'
+
+### extended_address
+- **Type**: String (IPv6)
+- **Example**: extended_address contains '2001:db8'
+
+## Signal & Performance Fields
+
+### signal_percent
+- **Type**: Numeric (0-100)
+- **Example**: signal_percent>=50
+
+### signal_strength
+- **Type**: Numeric (dBm)
+- **Example**: signal_strength>-80
+
+## Organizational Fields
+
+### group
+- **Type**: Group/Path
+- **Format**: Hierarchical path like '/Production/Region1'
+- **Operators**: =, startswith, endswith
+- **Example**: group startswith '/Production'
+
+### tags
+- **Type**: Tag array
+- **Operators**: =, contains
+- **Example**: tags='critical-infrastructure'
+
+## Temporal Fields
+
+### last_connect
+- **Type**: Timestamp
+- **Format**: Relative (-1d, -12h, -30m)
+- **Example**: last_connect>-1d
+
+### last_disconnect
+- **Type**: Timestamp
+- **Format**: Relative notation
+- **Example**: last_disconnect<-7d
+
+## Firmware Fields
+
+### firmware_version
+- **Type**: String
+- **Example**: firmware_version='23.2.0.18'
+
+### firmware_level
+- **Type**: Numeric
+- **Example**: firmware_level>=23020018
+
+## Location Fields
+
+### location
+- **Type**: Geoposition
+- **Operators**: within, outside
+- **Format**: [sw_lon, sw_lat, ne_lon, ne_lat]
+- **Example**: location within [-122.5,37.5,-122.0,38.0]
+
+### latitude
+- **Type**: Numeric
+- **Example**: latitude>37.0
+
+### longitude
+- **Type**: Numeric
+- **Example**: longitude<-122.0
+
+## Usage Examples by Field Type
+
+### Enumerated String Fields
+\`\`\`
+connection_status='connected'
+health_status='error'
+\`\`\`
+
+### String Fields with Pattern Matching
+\`\`\`
+name contains 'warehouse'
+type='EX50'
+firmware_version startswith '23.2'
+\`\`\`
+
+### Numeric Comparisons
+\`\`\`
+signal_percent>=70
+vendor_id=0x00409D
+\`\`\`
+
+### Timestamp Queries
+\`\`\`
+last_connect>-1d
+last_connect>-12h and last_connect<-1h
+\`\`\`
+
+### Group Queries
+\`\`\`
+group='/Production/Region1'
+group startswith '/Production'
+\`\`\`
+
+### Tag Queries
+\`\`\`
+tags='sensor'
+tags='critical-infrastructure'
+\`\`\`
+
+### Combined Queries
+\`\`\`
+type='EX50' and connection_status='connected' and signal_percent>50
+name contains 'router' and group startswith '/Production' and last_connect>-1d
+\`\`\`
+
+## Notes
+- All string values MUST use single quotes
+- String comparisons are case-insensitive
+- Field names are case-sensitive (use exact names from this guide)
+- Not all fields may be present on all devices
+- Use list_devices without a query first to see actual field values`;
+  }
+
+  getQueryExamples(useCase) {
+    const examples = {
+      filter_by_type: {
+        description: "Filter devices by their model/type",
+        examples: [
+          { query: "type='EX50'", description: "All EX50 devices" },
+          { query: "type='TX64' or type='TX54'", description: "TX64 or TX54 devices" },
+          { query: "type contains 'EX'", description: "All devices with 'EX' in type name" }
+        ]
+      },
+      filter_by_status: {
+        description: "Filter devices by connection or health status",
+        examples: [
+          { query: "connection_status='connected'", description: "Only connected devices" },
+          { query: "connection_status='disconnected'", description: "Only disconnected devices" },
+          { query: "health_status='error'", description: "Devices with health errors" },
+          { query: "connection_status='connected' and health_status='ok'", description: "Healthy and connected devices" }
+        ]
+      },
+      filter_by_signal: {
+        description: "Filter devices by signal strength",
+        examples: [
+          { query: "signal_percent<50", description: "Devices with weak signal (below 50%)" },
+          { query: "signal_percent>=70", description: "Devices with good signal (70% or higher)" },
+          { query: "signal_percent<30 and connection_status='connected'", description: "Connected but poor signal" }
+        ]
+      },
+      filter_by_group: {
+        description: "Filter devices by group/organization",
+        examples: [
+          { query: "group='/Production'", description: "Devices exactly in /Production group" },
+          { query: "group startswith '/Production'", description: "All devices under /Production hierarchy" },
+          { query: "group startswith '/Production/Region1'", description: "Devices in Region1 sub-group" },
+          { query: "group contains 'warehouse'", description: "Groups with 'warehouse' in path" }
+        ]
+      },
+      filter_by_time: {
+        description: "Filter devices by last connection time",
+        examples: [
+          { query: "last_connect>-1d", description: "Connected within last 24 hours" },
+          { query: "last_connect>-12h", description: "Connected within last 12 hours" },
+          { query: "last_connect<-7d", description: "Not connected in over a week" },
+          { query: "last_connect>-1h and connection_status='disconnected'", description: "Recently disconnected (was online in last hour)" }
+        ]
+      },
+      combine_filters: {
+        description: "Complex queries combining multiple conditions",
+        examples: [
+          { query: "type='EX50' and connection_status='connected' and signal_percent>50", description: "Connected EX50 devices with good signal" },
+          { query: "(type='EX50' or type='EX15') and group startswith '/Production'", description: "EX50 or EX15 devices in Production" },
+          { query: "name contains 'router' and last_connect>-1d and health_status='ok'", description: "Healthy routers connected recently" },
+          { query: "connection_status='disconnected' and last_connect<-7d", description: "Long-term offline devices" },
+          { query: "tags='critical' and (health_status='error' or connection_status='disconnected')", description: "Critical devices with issues" }
+        ]
+      }
+    };
+
+    if (useCase === "all") {
+      return examples;
+    }
+
+    return examples[useCase] || { error: `Unknown use case: ${useCase}. Use 'all' to see all examples.` };
+  }
+
+  validateQuerySyntax(query) {
+    const errors = [];
+    const warnings = [];
+
+    // Check for double quotes (most common error)
+    if (query.includes('"')) {
+      errors.push({
+        error: "Query contains double quotes",
+        problem: `Found double quotes (") in query`,
+        solution: "Replace all double quotes with single quotes (')",
+        examples: [
+          "❌ type=\"EX50\"",
+          "✅ type='EX50'"
+        ]
+      });
+    }
+
+    // Check for backslash escaping
+    if (query.includes("\\'") || query.includes('\\"')) {
+      errors.push({
+        error: "Invalid quote escaping",
+        problem: "Using backslash to escape quotes",
+        solution: "Double the single quote instead of using backslash",
+        examples: [
+          "❌ name='Fred\\'s Device'",
+          "✅ name='Fred''s Device'"
+        ]
+      });
+    }
+
+    // Check for common operator mistakes
+    if (query.match(/\b(contains|startswith|endswith)\s*=\s*/i)) {
+      errors.push({
+        error: "Invalid operator usage",
+        problem: "Using '=' with string operators",
+        solution: "Remove the '=' when using contains/startswith/endswith",
+        examples: [
+          "❌ name contains = 'router'",
+          "✅ name contains 'router'"
+        ]
+      });
+    }
+
+    // Check for AND/OR casing (should be lowercase)
+    if (query.match(/\b(AND|OR|NOT)\b/)) {
+      warnings.push({
+        warning: "Uppercase logical operators",
+        problem: "Using AND/OR/NOT in uppercase",
+        suggestion: "Use lowercase: and, or, not",
+        note: "API may accept uppercase, but lowercase is recommended"
+      });
+    }
+
+    // Check for unbalanced quotes
+    const singleQuoteCount = (query.match(/'/g) || []).length;
+    if (singleQuoteCount % 2 !== 0) {
+      errors.push({
+        error: "Unbalanced quotes",
+        problem: `Found ${singleQuoteCount} single quotes (should be even number)`,
+        solution: "Ensure every opening quote has a closing quote"
+      });
+    }
+
+    // Check for unbalanced parentheses
+    const openParen = (query.match(/\(/g) || []).length;
+    const closeParen = (query.match(/\)/g) || []).length;
+    if (openParen !== closeParen) {
+      errors.push({
+        error: "Unbalanced parentheses",
+        problem: `Found ${openParen} opening and ${closeParen} closing parentheses`,
+        solution: "Ensure every opening parenthesis has a matching closing one"
+      });
+    }
+
+    // Check for common field name typos
+    const commonFieldTypos = {
+      'status': 'connection_status or health_status',
+      'connected': 'connection_status',
+      'signal': 'signal_percent or signal_strength',
+      'last_seen': 'last_connect'
+    };
+
+    for (const [typo, correction] of Object.entries(commonFieldTypos)) {
+      if (query.match(new RegExp(`\\b${typo}\\s*=`, 'i'))) {
+        warnings.push({
+          warning: `Possible field name typo: '${typo}'`,
+          suggestion: `Did you mean: ${correction}?`
+        });
+      }
+    }
+
+    const result = {
+      valid: errors.length === 0,
+      query: query,
+      errors: errors,
+      warnings: warnings
+    };
+
+    if (result.valid) {
+      result.message = "✅ Query syntax appears valid";
+      result.note = "Note: This is a basic syntax check. The API may still reject queries with invalid field names or values.";
+    } else {
+      result.message = `❌ Found ${errors.length} syntax error(s)`;
+      result.recommendation = "Fix the errors above and try again. Most common issue: use single quotes (') not double quotes (\") for string values.";
+    }
+
+    return result;
+  }
+
+  getBuildQueryHelp(useCase) {
+    return `# Step-by-Step Query Builder
+
+## Use Case: ${useCase}
+
+${this.getQueryExamples(useCase === "general filtering" ? "all" : useCase)}
+
+## General Steps to Build a Query
+
+1. **Identify what you want to filter**
+   - Device type? Use: type='ModelName'
+   - Connection status? Use: connection_status='connected' or 'disconnected'
+   - Signal strength? Use: signal_percent>threshold
+   - Group/organization? Use: group startswith '/path'
+   - Time-based? Use: last_connect>-Xd (X days ago)
+
+2. **Use SINGLE QUOTES for all string values**
+   - ✅ CORRECT: type='EX50'
+   - ❌ WRONG: type="EX50"
+
+3. **Combine conditions with 'and' or 'or'**
+   - type='EX50' and connection_status='connected'
+   - (type='EX50' or type='EX15') and signal_percent>50
+
+4. **Test simple queries first**
+   - Start with: connection_status='connected'
+   - Then add: connection_status='connected' and signal_percent>50
+   - Then add more conditions as needed
+
+5. **Use parentheses for complex logic**
+   - (condition1 or condition2) and condition3
+
+## Quick Templates
+
+**Find devices by type:**
+type='MODELNAME'
+
+**Find connected devices:**
+connection_status='connected'
+
+**Find devices with issues:**
+health_status='error' or connection_status='disconnected'
+
+**Find devices in a group:**
+group startswith '/GroupPath'
+
+**Find recently active devices:**
+last_connect>-1d
+
+**Complex example:**
+(type='EX50' or type='EX15') and connection_status='connected' and signal_percent>=70 and group startswith '/Production'
+
+## Remember
+- Always use single quotes (') for strings
+- Test with get_query_syntax_help if unsure
+- Use validate_query_syntax to check before executing
+- Start simple and add conditions incrementally`;
   }
 
   // ============================================
