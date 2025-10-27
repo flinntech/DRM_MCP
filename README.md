@@ -64,7 +64,17 @@ cd DRM_MCP
 npm install
 ```
 
-### 2. Configure Environment
+### 2. Build the TypeScript Code
+
+The server is written in TypeScript. Build it before running:
+
+```bash
+npm run build
+```
+
+This compiles the TypeScript code in `src/` to JavaScript in `dist/`.
+
+### 3. Configure Environment
 
 Copy the example environment file and configure your API credentials:
 
@@ -79,7 +89,7 @@ DRM_API_KEY_ID=your_api_key_id_here
 DRM_API_KEY_SECRET=your_api_key_secret_here
 ```
 
-### 3. Run the Server
+### 4. Run the Server
 
 **Stdio mode (default)** - for MCP clients like Claude Desktop:
 
@@ -92,6 +102,54 @@ npm start
 ```bash
 MCP_TRANSPORT=http MCP_PORT=3000 npm start
 ```
+
+## Development
+
+The project is written in TypeScript with full type safety.
+
+### Project Structure
+
+```
+drm-mcp/
+├── src/
+│   ├── types/
+│   │   ├── auth.types.ts      # Authentication & multi-tenant types
+│   │   ├── tool.types.ts      # Tool system types
+│   │   ├── api.types.ts       # DRM API response types
+│   │   └── server.types.ts    # Server configuration types
+│   └── server.ts              # Main server implementation
+├── dist/                      # Compiled JavaScript (generated)
+├── tsconfig.json              # TypeScript configuration
+└── package.json
+```
+
+### Development Workflow
+
+**Watch mode** - automatically recompile on changes:
+
+```bash
+npm run dev
+```
+
+**Build for production**:
+
+```bash
+npm run build
+```
+
+**Type check without building**:
+
+```bash
+npx tsc --noEmit
+```
+
+### TypeScript Benefits
+
+- **Type safety** for all 60+ tool arguments and responses
+- **Compile-time validation** of API calls and data structures
+- **Better IDE support** with autocomplete and inline documentation
+- **Refactoring safety** across the 2,700+ line codebase
+- **Multi-tenant credential type checking**
 
 ## Multi-Tenant Configuration
 
