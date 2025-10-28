@@ -2709,8 +2709,17 @@ last_connect>-1d
   private async startHttpServer(port: number): Promise<void> {
     const express = (await import('express')).default;
     const cors = (await import('cors')).default;
+    const { StructuredLogger } = await import('./shared/structured-logger.js');
+    const { requestTracingMiddleware } = await import('./shared/request-tracing-middleware.js');
 
     const app = express();
+
+    // Create structured logger
+    const logger = new StructuredLogger('drm-mcp-server', 'info');
+
+    // Add request tracing middleware
+    app.use(requestTracingMiddleware({ logger }));
+
     app.use(cors({
       origin: '*',
       methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
@@ -2723,7 +2732,11 @@ last_connect>-1d
       // Extract user_id from header (defaults to 'default' for single-tenant mode)
       const userId = (req.headers['x-user-id'] as string) || 'default';
 
-      console.error(`${req.method} /mcp - Request received (user: ${userId})`);
+      logger.debug('MCP request received', {
+        userId,
+        method: req.method,
+        requestId: req.correlationId
+      });
 
       try {
         // Run the request in the context of this userId using AsyncLocalStorage
@@ -2741,9 +2754,17 @@ last_connect>-1d
           await transport.handleRequest(req, res, req.body);
         });
 
-        console.error(`${req.method} /mcp - Request handled successfully (user: ${userId})`);
+        logger.debug('MCP request handled successfully', {
+          userId,
+          method: req.method,
+          requestId: req.correlationId
+        });
       } catch (error) {
-        console.error(`Error handling MCP request for user ${userId}:`, error);
+        logger.error('Error handling MCP request', {
+          userId,
+          error: error as Error,
+          requestId: req.correlationId
+        });
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: '2.0',
@@ -2776,6 +2797,12 @@ last_connect>-1d
     });
     
     app.listen(port, () => {
+      logger.info('DRM MCP Server started', {
+        port,
+        endpoint: `/mcp`,
+        healthCheck: `/health`,
+        multiTenant: Object.keys(USER_CREDENTIALS).length > 0
+      });
       console.error(`Digi Remote Manager MCP server running on HTTP port ${port}`);
       console.error(`Streamable HTTP endpoint: http://localhost:${port}/mcp`);
       console.error(`Health check: http://localhost:${port}/health`);

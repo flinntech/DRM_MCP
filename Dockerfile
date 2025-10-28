@@ -1,35 +1,52 @@
-# Use Node.js LTS version
+# Multi-stage build for DRM MCP Server
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install ALL dependencies (including dev dependencies for building)
+RUN npm ci
+
+# Copy source code
+COPY src/ ./src/
+
+# Build TypeScript
+RUN npm run build
+
+# Production stage
 FROM node:20-alpine
 
-# Set working directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (production only)
-# Note: Using npm install instead of npm ci because package-lock.json might not be in repo
-RUN npm install --production
+# Install production dependencies only
+RUN npm ci --omit=dev && \
+    npm cache clean --force
 
-# Copy application files
-COPY drm-mcp-server.js ./
+# Copy built files from builder stage
+COPY --from=builder /app/dist ./dist
 
 # Create a non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Change ownership of the app directory
+# Change ownership
 RUN chown -R nodejs:nodejs /app
 
 # Switch to non-root user
 USER nodejs
 
-# Expose stdio for MCP communication
-# Note: MCP servers communicate via stdio, not network ports
+# Expose port for HTTP mode
+EXPOSE 3001
 
-# Health check (optional - checks if node process is running)
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "process.exit(0)" || exit 1
+# Health check for HTTP mode
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:3001/health || exit 1
 
-# Run the MCP server
-CMD ["node", "drm-mcp-server.js"]
+# Run the MCP server from dist
+CMD ["node", "dist/server.js"]
