@@ -138,10 +138,11 @@ class DigiRemoteManagerServer {
 When building queries for DRM tools (list_devices, list_streams, list_alerts, etc.):
 
 ### String Values
-- ✅ CORRECT: type='EX50'
-- ❌ WRONG: type="EX50"
-- ✅ CORRECT: connection_status='connected'
-- ❌ WRONG: connection_status="connected"
+- ✅ CORRECT: type contains 'EX50' (recommended for partial matching when you don't know exact DB value)
+- ✅ ALSO CORRECT: type='Digi EX50' (exact match if you know full type name in database)
+- ❌ WRONG: type="EX50" (double quotes not allowed)
+- ✅ CORRECT: connection_status='connected' (exact match for enum values)
+- ❌ WRONG: connection_status="connected" (double quotes not allowed)
 
 ### Escaping Single Quotes
 To include a single quote in a string value, double it:
@@ -160,6 +161,34 @@ To include a single quote in a string value, double it:
 connection_status, health_status, type, name, mac, ip, firmware_version,
 signal_percent, group, tags, last_connect, vendor_id, customer_id
 
+### Operator Selection Strategy
+**Choose the right operator based on the field and user's knowledge:**
+
+**Use `contains` when:**
+- User doesn't know exact database values (type, mac, ip, firmware_version)
+- Users naturally abbreviate (user says "EX50", DB has "Digi EX50")
+- Searching for partial matches (MAC OUI, subnet, version prefix)
+- Field is: type, name, mac, ip, firmware_version, tags
+
+**Use `=` (exact equality) when:**
+- Field is an enum (connection_status, health_status, severity, role)
+- Matching exact IDs (device_id, customer_id)
+- User has confirmed exact database value
+
+**Use `startswith`/`endswith` when:**
+- Hierarchical paths (group startswith '/Production')
+- Version/MAC/IP prefixes (firmware_version startswith '23.2')
+
+**Use comparison operators when:**
+- Numeric ranges (signal_percent>=50)
+- Time ranges (last_connect>-1d)
+
+**Examples:**
+- User asks "find EX50 devices" → type contains 'EX50' (NOT type='EX50')
+- User asks "find connected devices" → connection_status='connected' (enum)
+- User asks "weak signal" → signal_percent<50 (numeric)
+- User asks "production devices" → group startswith '/Production' (hierarchy)
+
 ### Timestamp Format
 Use relative notation for time-based queries:
 - -60m (60 minutes ago)
@@ -175,12 +204,16 @@ Use relative notation for time-based queries:
 - URL encoding is handled automatically
 
 ### Example Queries
-- type='EX50'
+- type contains 'EX50' (search by partial model name - RECOMMENDED)
 - connection_status='connected' and signal_percent>50
 - name contains 'router'
+- mac contains '00:40:9D' (search by vendor OUI)
+- ip contains '192.168.1' (search by subnet)
+- firmware_version contains '23.2' (all 23.2.x versions)
 - group startswith '/Production'
+- tags contains 'sensor'
 - last_connect>-1d
-- (type='EX50' or type='EX15') and connection_status='connected'
+- (type contains 'EX50' or type contains 'EX15') and connection_status='connected'
 
 If you encounter query syntax errors, check that you're using single quotes for all string values.`,
       }
@@ -265,7 +298,7 @@ If you encounter query syntax errors, check that you're using single quotes for 
         name: "bulk_operations",
         display_name: "Bulk Operations & CSV Exports",
         description: "Export tools for CSV generation: device lists, stream data, jobs, events. Use for data analysis, Excel imports, or reporting.",
-        tool_count: 5,
+        tool_count: 6,
         tools: ["list_devices_bulk", "list_streams_bulk", "get_stream_history_bulk", "get_stream_rollups_bulk", "list_jobs_bulk", "list_events_bulk"]
       },
       advanced_data: {
@@ -311,12 +344,26 @@ If you encounter query syntax errors, check that you're using single quotes for 
         tool_count: 2,
         tools: ["list_jobs", "get_job"]
       },
-      admin: {
-        name: "admin",
-        display_name: "Administration & Configuration",
-        description: "Admin tools: users, files, templates, health configs, account security. For account/config management.",
-        tool_count: 9,
-        tools: ["list_users", "get_user", "list_files", "get_file", "list_templates", "get_template", "list_health_configs", "get_health_config", "get_account_security"]
+      user_management: {
+        name: "user_management",
+        display_name: "User Management",
+        description: "User account tools: list users, view user details, manage account security settings.",
+        tool_count: 3,
+        tools: ["list_users", "get_user", "get_account_security"]
+      },
+      configuration: {
+        name: "configuration",
+        display_name: "Configuration & Templates",
+        description: "Configuration management: device templates, health monitoring configs. For managing device settings and monitoring configurations.",
+        tool_count: 4,
+        tools: ["list_templates", "get_template", "list_health_configs", "get_health_config"]
+      },
+      files: {
+        name: "files",
+        display_name: "File Management",
+        description: "File operations: list and retrieve files from Remote Manager (configs, firmware, logs).",
+        tool_count: 2,
+        tools: ["list_files", "get_file"]
       },
       events: {
         name: "events",
@@ -329,8 +376,8 @@ If you encounter query syntax errors, check that you're using single quotes for 
 
     // Define core tools that are always available
     this.coreTools = [
-      "discover_tool_categories",
-      "enable_tool_category",
+      "list_tool_categories",
+      "load_tool_category",
       "get_query_syntax_help",
       "get_device_fields",
       "get_query_examples",
@@ -504,8 +551,8 @@ If you encounter query syntax errors, check that you're using single quotes for 
     try {
       switch (name) {
         // Dynamic tool management
-        case "discover_tool_categories": return this.discoverToolCategories();
-        case "enable_tool_category": return this.enableToolCategory(args);
+        case "list_tool_categories": return this.listToolCategories();
+        case "load_tool_category": return this.loadToolCategory(args);
 
         // Query syntax help tools
         case "get_query_syntax_help": return this.getQuerySyntaxHelpTool();
@@ -610,7 +657,7 @@ If you encounter query syntax errors, check that you're using single quotes for 
   // DYNAMIC TOOL MANAGEMENT METHODS
   // ============================================
 
-  private discoverToolCategories(): ToolResponse {
+  private listToolCategories(): ToolResponse {
     const userId = this.getCurrentUserId();
     const userCategories = this.getUserEnabledCategories(userId);
 
@@ -633,21 +680,21 @@ If you encounter query syntax errors, check that you're using single quotes for 
     return this.formatResponse(summary);
   }
 
-  private enableToolCategory(args: Record<string, any>): ToolResponse {
+  private loadToolCategory(args: Record<string, any>): ToolResponse {
     const { category } = args;
     const userId = this.getCurrentUserId();
     const userCategories = this.getUserEnabledCategories(userId);
 
     if (!this.toolCategories[category]) {
       return {
-        content: [{ type: "text" as const, text: `Error: Unknown category '${category}'. Use discover_tool_categories to see available categories.` }],
+        content: [{ type: "text" as const, text: `Error: Unknown category '${category}'. Use list_tool_categories to see available categories.` }],
         isError: true
       };
     }
 
     if (userCategories.has(category)) {
       return this.formatResponse({
-        message: `Category '${category}' is already enabled`,
+        message: `Category '${category}' is already loaded`,
         category: this.toolCategories[category].display_name,
         tools_count: this.toolCategories[category].tool_count
       });
@@ -656,11 +703,11 @@ If you encounter query syntax errors, check that you're using single quotes for 
     userCategories.add(category);
 
     return this.formatResponse({
-      message: `Successfully enabled category: ${this.toolCategories[category].display_name}`,
+      message: `Successfully loaded category: ${this.toolCategories[category].display_name}`,
       category: category,
-      tools_enabled: this.toolCategories[category].tools,
+      tools_loaded: this.toolCategories[category].tools,
       tools_count: this.toolCategories[category].tool_count,
-      total_enabled_tools: this.getEnabledTools().length
+      total_loaded_tools: this.getEnabledTools().length
     });
   }
 
@@ -687,22 +734,22 @@ If you encounter query syntax errors, check that you're using single quotes for 
         // TOOL MANAGEMENT
         // ============================================
         {
-          name: "discover_tool_categories",
-          description: "Discover available tool categories and their status. Shows all tool categories that can be dynamically loaded, including descriptions, tool counts, and whether each category is currently enabled. Use this first to see what additional tools are available beyond the core toolset.",
+          name: "list_tool_categories",
+          description: "List available tool categories that can be loaded on-demand. Shows category descriptions, tool counts, and current load status. Categories are lazy-loaded for performance - load any category as needed without requiring permission.",
           inputSchema: {
             type: "object",
             properties: {},
           },
         },
         {
-          name: "enable_tool_category",
-          description: "Enable a category of tools to make them available for use. This dynamically loads additional tools grouped by functionality (e.g., 'reports', 'sci', 'bulk_operations'). Once enabled, all tools in that category become available. Use discover_tool_categories first to see available categories.",
+          name: "load_tool_category",
+          description: "Load a category of tools to make them immediately available. Tools are organized into categories for performance optimization. No permission required - load any category needed for the current task.",
           inputSchema: {
             type: "object",
             properties: {
               category: {
                 type: "string",
-                description: "Category name to enable (e.g., 'reports', 'sci', 'bulk_operations', 'firmware', 'automations', 'admin', 'jobs', 'monitors', 'events', 'advanced_data')"
+                description: "Category name to load (e.g., 'sci', 'bulk_operations', 'firmware', 'automations', 'user_management', 'configuration', 'files', 'jobs', 'monitors', 'events', 'advanced_data')"
               },
             },
             required: ["category"],
@@ -758,13 +805,13 @@ If you encounter query syntax errors, check that you're using single quotes for 
         // ============================================
         {
           name: "list_devices",
-          description: "**PRIMARY TOOL FOR DEVICE COUNTS** - List devices with advanced query filtering. This is the SOURCE OF TRUTH for accurate device counts. Returns paginated device inventory with real-time connection status, health, location, signal strength, and metadata. The response includes 'count' field (total matching devices) and 'list' array (device objects). When counting devices, ALWAYS use this tool and count items in the returned list - DO NOT rely on cached reports. Query examples (note SINGLE QUOTES): No filter (all devices), connection_status='connected' (online devices only), signal_percent<50 (weak signal), group startswith '/Production' (by group path), tags='sensor' (by tag), last_connect>-1d (recently connected), health_status='error' (unhealthy). **CRITICAL: Use single quotes (') not double quotes (\") for string values.**",
+          description: "**PRIMARY TOOL FOR DEVICE COUNTS** - List devices with advanced query filtering. This is the SOURCE OF TRUTH for accurate device counts. Returns paginated device inventory with real-time connection status, health, location, signal strength, and metadata. The response includes 'count' field (total matching devices) and 'list' array (device objects). When counting devices, ALWAYS use this tool and count items in the returned list - DO NOT rely on cached reports. Query examples (note SINGLE QUOTES): No filter (all devices), type contains 'EX50' (device model search), connection_status='connected' (online devices only), signal_percent<50 (weak signal), mac contains '00:40:9D' (by vendor OUI), ip contains '192.168.1' (by subnet), group startswith '/Production' (by group path), tags contains 'sensor' (by tag), last_connect>-1d (recently connected), health_status='error' (unhealthy). **CRITICAL: Use single quotes (') not double quotes (\") for string values.** **TIP: Use 'contains' for type, name, MAC, IP, firmware when you don't know exact database values.**",
           inputSchema: {
             type: "object",
             properties: {
               query: {
                 type: "string",
-                description: "**IMPORTANT: String values MUST use SINGLE QUOTES ('), NOT double quotes (\").**\n\nQuery filter using DRM query language.\n\nOPERATORS: =, <>, <, <=, >, >=, contains, startswith, endswith, within, outside, and, or, not\n\nCOMMON FIELDS: connection_status, health_status, type, name, mac, ip, firmware_version, signal_percent, group, tags, last_connect\n\nEXAMPLES (note single quotes):\n  type='EX50'\n  connection_status='connected' and signal_percent>50\n  name contains 'router'\n  group startswith '/Production'\n  last_connect>-1d\n  tags='critical'\n\nESCAPING: Use '' to include a single quote: name='Fred''s Device'\n\nNOTE: String comparisons are case-insensitive. Use get_query_syntax_help tool for complete syntax guide."
+                description: "**IMPORTANT: String values MUST use SINGLE QUOTES ('), NOT double quotes (\").**\n\nQuery filter using DRM query language.\n\nOPERATORS: =, <>, <, <=, >, >=, contains, startswith, endswith, within, outside, and, or, not\n\nCOMMON FIELDS: connection_status, health_status, type, name, mac, ip, firmware_version, signal_percent, group, tags, last_connect\n\nEXAMPLES (note single quotes):\n  type contains 'EX50'  (search device model - RECOMMENDED for partial matching)\n  type='Digi EX50'  (exact match only if you know full type name)\n  connection_status='connected' and signal_percent>50\n  name contains 'router'\n  mac contains '00:40:9D'  (search by vendor OUI prefix)\n  ip contains '192.168.1'  (search by subnet)\n  firmware_version contains '23.2'  (search by version prefix)\n  group startswith '/Production'\n  group contains 'warehouse'  (search by group name fragment)\n  tags contains 'sensor'  (search tags)\n  last_connect>-1d\n\nESCAPING: Use '' to include a single quote: name='Fred''s Device'\n\nNOTE: String comparisons are case-insensitive. Use get_query_syntax_help tool for complete syntax guide.\n\n**TIP:** Use 'contains' when you don't know exact database values. Use '=' for enums (status fields) and exact known values."
               },
               size: { 
                 type: "number", 
@@ -789,7 +836,7 @@ If you encounter query syntax errors, check that you're using single quotes for 
             properties: {
               query: {
                 type: "string",
-                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings, not double quotes.**\n\nSame query syntax as list_devices. Examples: type='EX50', connection_status='connected', signal_percent>50. Use get_query_syntax_help for complete guide."
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings, not double quotes.**\n\nSame query syntax as list_devices. Examples: type contains 'EX50' (device model search), connection_status='connected', signal_percent>50, mac contains '00:40:9D' (by OUI), ip contains '192.168.1' (by subnet). Use get_query_syntax_help for complete guide."
               },
               fields: { 
                 type: "string", 
@@ -1206,7 +1253,7 @@ If you encounter query syntax errors, check that you're using single quotes for 
             properties: {
               query: { 
                 type: "string", 
-                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter firmware. Examples: type='ConnectPort X4', version='1.2.3', production=true" 
+                description: "**IMPORTANT: Use SINGLE QUOTES (') for strings.** Filter firmware. Examples: type contains 'ConnectPort' (device type search), version contains '1.2' (version prefix search), production=true" 
               },
               orderby: { type: "string", description: "Sort: 'version desc' for latest first" },
             },
@@ -2174,10 +2221,11 @@ If you encounter query syntax errors, check that you're using single quotes for 
 ### Basic Syntax
 
 #### String Values (MOST IMPORTANT)
-- ✅ CORRECT: type='EX50'
-- ❌ WRONG: type="EX50"
-- ✅ CORRECT: connection_status='connected'
-- ❌ WRONG: connection_status="connected"
+- ✅ CORRECT: type contains 'EX50' (recommended for partial matching)
+- ✅ ALSO CORRECT: type='Digi EX50' (exact match if you know full value)
+- ❌ WRONG: type="EX50" (double quotes not allowed)
+- ✅ CORRECT: connection_status='connected' (exact match for enum values)
+- ❌ WRONG: connection_status="connected" (double quotes not allowed)
 
 #### Escaping Single Quotes
 To include a single quote in a string, double it:
@@ -2186,16 +2234,16 @@ To include a single quote in a string, double it:
 
 ### Operators
 
-| Operator | Types | Example |
-|----------|-------|---------|
-| = | All types | type='EX50' |
-| <> | All types | connection_status<>'disconnected' |
-| <, <=, >=, > | Numbers, Timestamps | signal_percent>=50 |
-| contains | Strings, Tags | name contains 'router' |
-| startswith | Strings, Tags, Groups | group startswith '/Production' |
-| endswith | Strings, Tags | name endswith '-backup' |
-| within | Geoposition | location within [-122.5,37.5,-122.0,38.0] |
-| outside | Geoposition | location outside [-122.5,37.5,-122.0,38.0] |
+| Operator | Types | Example | Use Case |
+|----------|-------|---------|----------|
+| = | All types | connection_status='connected' | Exact match (enums, IDs, exact known values) |
+| <> | All types | connection_status<>'disconnected' | Not equal |
+| <, <=, >=, > | Numbers, Timestamps | signal_percent>=50 | Numeric/time comparisons |
+| contains | Strings, Tags | type contains 'EX50' | **RECOMMENDED for type, mac, ip, firmware, tags** |
+| startswith | Strings, Tags, Groups | group startswith '/Production' | Hierarchies, prefixes |
+| endswith | Strings, Tags | name endswith '-backup' | Suffixes |
+| within | Geoposition | location within [-122.5,37.5,-122.0,38.0] | Geographic boundaries |
+| outside | Geoposition | location outside [-122.5,37.5,-122.0,38.0] | Outside geographic area |
 
 ### Logical Operators
 - **and**: Both conditions must be true
@@ -2204,8 +2252,8 @@ To include a single quote in a string, double it:
 - **Parentheses**: Group conditions for precedence
 
 Examples:
-- type='EX50' and connection_status='connected'
-- (type='EX50' or type='EX15') and signal_percent>50
+- type contains 'EX50' and connection_status='connected'
+- (type contains 'EX50' or type contains 'EX15') and signal_percent>50
 - not (health_status='error')
 
 ### Timestamp Format
@@ -2231,7 +2279,8 @@ Examples:
 
 #### Filter by Device Type
 \`\`\`
-type='EX50'
+type contains 'EX50'  (searches for any device with 'EX50' in type - RECOMMENDED)
+type='Digi EX50'  (exact match if you know full type name)
 \`\`\`
 
 #### Connected Devices with Good Signal
@@ -2251,7 +2300,7 @@ last_connect>-1d
 
 #### Complex Multi-Condition Query
 \`\`\`
-(type='EX50' or type='EX15') and connection_status='connected' and signal_percent>=70 and last_connect>-12h
+(type contains 'EX50' or type contains 'EX15') and connection_status='connected' and signal_percent>=70 and last_connect>-12h
 \`\`\`
 
 #### Devices with Specific Tag
@@ -2269,6 +2318,10 @@ name contains 'warehouse' and connection_status='connected'
 2. ❌ Forgetting to escape quotes: name='Fred's Device'
 3. ❌ Wrong timestamp format: last_connect>-1day
 4. ❌ Case-sensitive field names: Type='EX50'
+5. ❌ Using exact match when you don't know database values: type='EX50' (might fail if DB has 'Digi EX50')
+   - ✅ Instead use: type contains 'EX50'
+6. ❌ Incomplete MAC/IP with exact match: mac='00:40:9D' or ip='192.168.1'
+   - ✅ Instead use: mac contains '00:40:9D' or ip contains '192.168.1'
 
 ### Quick Reference
 - Always use single quotes for strings
@@ -2313,9 +2366,12 @@ All queryable device fields with data types and examples:
 - **Example**: name contains 'router'
 
 ### type
-- **Type**: String (device model)
-- **Common Values**: 'EX50', 'EX15', 'TX64', 'TX54', etc.
-- **Example**: type='EX50'
+- **Type**: String (device model - often stored as full product name like 'Digi EX50')
+- **Common Values**: 'Digi EX50', 'Digi EX15', 'Digi TX64', 'TX54', etc.
+- **Operators**: =, <>, contains, startswith, endswith
+- **Recommended**: type contains 'EX50' (searches partial model name - PREFERRED)
+- **Also Valid**: type='Digi EX50' (exact match if you know full database value)
+- **Why `contains`?**: Users naturally abbreviate ("EX50") but database often stores vendor prefix ("Digi EX50")
 
 ### vendor_id
 - **Type**: Numeric (Hexadecimal)
@@ -2329,15 +2385,27 @@ All queryable device fields with data types and examples:
 
 ### mac
 - **Type**: String (MAC address)
-- **Example**: mac='00:40:9D:FF:12:3B'
+- **Operators**: =, contains, startswith
+- **Examples**:
+  - mac contains '00:40:9D' (search by OUI - vendor prefix, RECOMMENDED)
+  - mac startswith '00:40:9D' (devices from specific vendor)
+  - mac='00:40:9D:FF:12:3B' (exact MAC if known)
 
 ### ip
 - **Type**: String (IP address)
-- **Example**: ip='192.168.1.100'
+- **Operators**: =, contains, startswith
+- **Examples**:
+  - ip contains '192.168.1' (search by subnet, RECOMMENDED)
+  - ip startswith '192.168.1' (devices in subnet)
+  - ip='192.168.1.100' (exact IP if known)
 
 ### public_ip
 - **Type**: String (Public IP address)
-- **Example**: public_ip='203.0.113.42'
+- **Operators**: =, contains, startswith
+- **Examples**:
+  - public_ip contains '203.0.113' (search by IP range, RECOMMENDED)
+  - public_ip startswith '203.0.113' (devices in range)
+  - public_ip='203.0.113.42' (exact public IP if known)
 
 ### extended_address
 - **Type**: String (IPv6)
@@ -2358,13 +2426,18 @@ All queryable device fields with data types and examples:
 ### group
 - **Type**: Group/Path
 - **Format**: Hierarchical path like '/Production/Region1'
-- **Operators**: =, startswith, endswith
-- **Example**: group startswith '/Production'
+- **Operators**: =, startswith, endswith, contains
+- **Examples**:
+  - group startswith '/Production' (all devices under /Production hierarchy, RECOMMENDED for hierarchies)
+  - group contains 'warehouse' (groups with 'warehouse' anywhere in path)
+  - group='/Production' (exact group match)
 
 ### tags
 - **Type**: Tag array
 - **Operators**: =, contains
-- **Example**: tags='critical-infrastructure'
+- **Examples**:
+  - tags contains 'sensor' (search for tags containing 'sensor', RECOMMENDED)
+  - tags='critical-infrastructure' (exact tag match if you know full tag name)
 
 ## Temporal Fields
 
@@ -2382,7 +2455,11 @@ All queryable device fields with data types and examples:
 
 ### firmware_version
 - **Type**: String
-- **Example**: firmware_version='23.2.0.18'
+- **Operators**: =, contains, startswith
+- **Examples**:
+  - firmware_version contains '23.2' (all 23.2.x versions, RECOMMENDED)
+  - firmware_version startswith '23.2' (versions starting with 23.2)
+  - firmware_version='23.2.0.18' (exact version if known)
 
 ### firmware_level
 - **Type**: Numeric
@@ -2404,6 +2481,73 @@ All queryable device fields with data types and examples:
 - **Type**: Numeric
 - **Example**: longitude<-122.0
 
+## 🎯 Query Operator Best Practices
+
+### When to Use Each Operator
+
+**Use `contains` when:**
+- You don't know the EXACT value stored in the database
+- Users naturally abbreviate (type: "EX50" vs DB: "Digi EX50")
+- Searching for partial matches (MAC OUI, subnet, version prefix)
+- Looking for keywords in names, descriptions, tags
+
+**Use `=` (exact equality) when:**
+- Filtering by enumerated values (connection_status, health_status, severity)
+- Matching exact IDs (device_id, customer_id)
+- You KNOW the exact database value
+
+**Use `startswith`/`endswith` when:**
+- Hierarchical paths (group startswith '/Production')
+- Version prefixes (firmware_version startswith '23.2')
+- MAC/IP prefixes (mac startswith '00:40:9D')
+
+**Use comparison operators (<, <=, >=, >) when:**
+- Numeric ranges (signal_percent>=50)
+- Time ranges (last_connect>-1d)
+
+### Real-World Examples
+
+#### ❌ BAD - Will Likely Fail
+\`\`\`
+type='EX50'                    # DB might have 'Digi EX50'
+mac='00:40:9D'                 # Incomplete MAC address
+firmware_version='23.2'        # DB has '23.2.0.18'
+ip='192.168.1'                 # Incomplete IP address
+\`\`\`
+
+#### ✅ GOOD - Will Work
+\`\`\`
+type contains 'EX50'           # Finds 'Digi EX50', 'EX50-5G', etc.
+mac contains '00:40:9D'        # Finds any MAC with this OUI
+firmware_version contains '23.2'  # Finds all 23.2.x versions
+ip contains '192.168.1'        # Finds any IP in 192.168.1.x
+\`\`\`
+
+#### 🎯 PERFECT - When You Know Exact Values
+\`\`\`
+connection_status='connected'  # Enum - exactly 'connected'
+health_status='error'          # Enum - exactly 'error'
+type='Digi EX50'              # You confirmed exact DB value
+id='00000000-00000000-00409DFF-FF122B8E'  # Exact UUID
+\`\`\`
+
+### 🔍 Discovery Workflow
+
+**Don't know exact database values?**
+1. First query: list_devices (no filter) → See what values actually exist
+2. Second query: Use exact '=' for known values OR 'contains' for partial matches
+3. Complex query: Combine multiple conditions with 'and'/'or'
+
+**Example workflow:**
+1. Run: list_devices → See that type field is 'Digi EX50' not 'EX50'
+2. Now you can use: type='Digi EX50' (fast exact match) OR type contains 'EX50' (flexible partial match)
+
+### Performance Note
+- `=` (exact match) is faster - uses indexes, O(1) lookup
+- `contains` (substring) is slower - requires scanning, O(n)
+- **However:** Correctness > Performance. A slow correct query beats a fast failing query.
+- For 1000+ devices, consider discovery workflow above to use exact matches when possible.
+
 ## Usage Examples by Field Type
 
 ### Enumerated String Fields
@@ -2415,8 +2559,11 @@ health_status='error'
 ### String Fields with Pattern Matching
 \`\`\`
 name contains 'warehouse'
-type='EX50'
-firmware_version startswith '23.2'
+type contains 'EX50'  (recommended - user doesn't know exact DB value)
+type='Digi EX50'  (exact match - only if you know DB stores "Digi EX50")
+firmware_version contains '23.2'  (any 23.2.x version)
+mac contains '00:40:9D'  (search by OUI)
+ip contains '192.168.1'  (search by subnet)
 \`\`\`
 
 ### Numeric Comparisons
@@ -2445,8 +2592,9 @@ tags='critical-infrastructure'
 
 ### Combined Queries
 \`\`\`
-type='EX50' and connection_status='connected' and signal_percent>50
+type contains 'EX50' and connection_status='connected' and signal_percent>50
 name contains 'router' and group startswith '/Production' and last_connect>-1d
+mac contains '00:40:9D' and signal_percent>=70
 \`\`\`
 
 ## Notes
@@ -2462,9 +2610,10 @@ name contains 'router' and group startswith '/Production' and last_connect>-1d
       filter_by_type: {
         description: "Filter devices by their model/type",
         examples: [
-          { query: "type='EX50'", description: "All EX50 devices" },
-          { query: "type='TX64' or type='TX54'", description: "TX64 or TX54 devices" },
-          { query: "type contains 'EX'", description: "All devices with 'EX' in type name" }
+          { query: "type contains 'EX50'", description: "Devices with 'EX50' in type name (e.g., 'Digi EX50', 'EX50-5G') - RECOMMENDED" },
+          { query: "type contains 'EX'", description: "All devices with 'EX' in type name" },
+          { query: "(type contains 'TX64' or type contains 'TX54')", description: "Devices with TX64 or TX54 in type name" },
+          { query: "type='Digi EX50'", description: "Exact match for specific type (only if you know full database value)" }
         ]
       },
       filter_by_status: {
@@ -2502,14 +2651,36 @@ name contains 'router' and group startswith '/Production' and last_connect>-1d
           { query: "last_connect>-1h and connection_status='disconnected'", description: "Recently disconnected (was online in last hour)" }
         ]
       },
+      filter_by_network: {
+        description: "Filter devices by MAC address, IP address, or network identifiers",
+        examples: [
+          { query: "mac contains '00:40:9D'", description: "Devices from specific vendor (search by OUI prefix)" },
+          { query: "mac startswith '00:40:9D'", description: "Devices with MAC starting with vendor OUI" },
+          { query: "ip contains '192.168.1'", description: "Devices in 192.168.1.x subnet" },
+          { query: "ip startswith '10.0'", description: "Devices in 10.0.x.x network range" },
+          { query: "public_ip contains '203.0.113'", description: "Devices with specific public IP range" }
+        ]
+      },
+      filter_by_firmware: {
+        description: "Filter devices by firmware version",
+        examples: [
+          { query: "firmware_version contains '23.2'", description: "All devices on 23.2.x firmware - RECOMMENDED" },
+          { query: "firmware_version startswith '23.2'", description: "Devices on firmware starting with 23.2" },
+          { query: "firmware_version='23.2.0.18'", description: "Exact firmware version (only if you know full version string)" },
+          { query: "firmware_level>230200018", description: "Firmware newer than specific version (numeric comparison)" }
+        ]
+      },
       combine_filters: {
         description: "Complex queries combining multiple conditions",
         examples: [
-          { query: "type='EX50' and connection_status='connected' and signal_percent>50", description: "Connected EX50 devices with good signal" },
-          { query: "(type='EX50' or type='EX15') and group startswith '/Production'", description: "EX50 or EX15 devices in Production" },
+          { query: "type contains 'EX50' and connection_status='connected' and signal_percent>50", description: "Connected EX50 devices with good signal" },
+          { query: "(type contains 'EX50' or type contains 'EX15') and group startswith '/Production'", description: "EX50 or EX15 devices in Production" },
           { query: "name contains 'router' and last_connect>-1d and health_status='ok'", description: "Healthy routers connected recently" },
+          { query: "mac contains '00:40:9D' and signal_percent>=70", description: "Devices from specific vendor (by OUI) with good signal" },
+          { query: "ip contains '192.168.1' and connection_status='connected'", description: "Connected devices in specific subnet" },
+          { query: "firmware_version contains '23.2' and health_status='ok'", description: "Healthy devices on 23.2.x firmware" },
           { query: "connection_status='disconnected' and last_connect<-7d", description: "Long-term offline devices" },
-          { query: "tags='critical' and (health_status='error' or connection_status='disconnected')", description: "Critical devices with issues" }
+          { query: "tags contains 'critical' and (health_status='error' or connection_status='disconnected')", description: "Critical devices with issues" }
         ]
       }
     };
@@ -2533,7 +2704,7 @@ name contains 'router' and group startswith '/Production' and last_connect>-1d
         solution: "Replace all double quotes with single quotes (')",
         examples: [
           "❌ type=\"EX50\"",
-          "✅ type='EX50'"
+          "✅ type contains 'EX50'"
         ]
       });
     }
@@ -2647,12 +2818,13 @@ ${this.getQueryExamples(useCase === "general filtering" ? "all" : useCase)}
    - Time-based? Use: last_connect>-Xd (X days ago)
 
 2. **Use SINGLE QUOTES for all string values**
-   - ✅ CORRECT: type='EX50'
-   - ❌ WRONG: type="EX50"
+   - ✅ CORRECT: type contains 'EX50' (recommended for partial matching)
+   - ✅ ALSO CORRECT: type='Digi EX50' (exact match if you know full value)
+   - ❌ WRONG: type="EX50" (double quotes not allowed)
 
 3. **Combine conditions with 'and' or 'or'**
-   - type='EX50' and connection_status='connected'
-   - (type='EX50' or type='EX15') and signal_percent>50
+   - type contains 'EX50' and connection_status='connected'
+   - (type contains 'EX50' or type contains 'EX15') and signal_percent>50
 
 4. **Test simple queries first**
    - Start with: connection_status='connected'
@@ -2665,7 +2837,7 @@ ${this.getQueryExamples(useCase === "general filtering" ? "all" : useCase)}
 ## Quick Templates
 
 **Find devices by type:**
-type='MODELNAME'
+type contains 'MODELNAME'  (searches for any device with MODELNAME in type)
 
 **Find connected devices:**
 connection_status='connected'
@@ -2676,11 +2848,20 @@ health_status='error' or connection_status='disconnected'
 **Find devices in a group:**
 group startswith '/GroupPath'
 
+**Find devices by MAC vendor:**
+mac contains '00:40:9D'
+
+**Find devices by subnet:**
+ip contains '192.168.1'
+
+**Find devices by firmware version:**
+firmware_version contains '23.2'
+
 **Find recently active devices:**
 last_connect>-1d
 
 **Complex example:**
-(type='EX50' or type='EX15') and connection_status='connected' and signal_percent>=70 and group startswith '/Production'
+(type contains 'EX50' or type contains 'EX15') and connection_status='connected' and signal_percent>=70 and group startswith '/Production'
 
 ## Remember
 - Always use single quotes (') for strings

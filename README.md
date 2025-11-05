@@ -18,33 +18,34 @@ Model Context Protocol (MCP) server for Digi Remote Manager API integration. Pro
 The server uses a category-based dynamic tool loading system to reduce LLM context usage:
 
 ### Core Tools (Always Available - 13 tools)
-- **Tool Management**: `discover_tool_categories`, `enable_tool_category`
+- **Tool Management**: `list_tool_categories`, `load_tool_category`
 - **Device Basics**: `list_devices`, `get_device`
 - **Stream Basics**: `list_streams`, `get_stream`, `get_stream_history`
 - **Organization**: `list_groups`, `get_group`
 - **Monitoring**: `list_alerts`, `get_alert`
 - **Account**: `get_account_info`, `get_api_info`
 
-### On-Demand Categories (49 tools organized into 10 categories)
+### On-Demand Categories (49 tools organized into 11 categories)
 
-Load additional tools by category using `enable_tool_category`:
+Load additional tools by category using `load_tool_category`:
 
-- **bulk_operations** (6 tools) - CSV export for devices, streams, jobs, events
+- **bulk_operations** (5 tools) - CSV export for devices, streams, jobs, events
 - **advanced_data** (3 tools) - Stream rollups, aggregations, device logs
-- **reports** (6 tools) - Connection, alert, device, cellular, availability reports
 - **automations** (6 tools) - Workflow automation management
 - **firmware** (4 tools) - Firmware management and updates
 - **sci** (9 tools) - Direct device communication via SCI/RCI
 - **monitors** (3 tools) - Webhook and monitor management
 - **jobs** (2 tools) - Async job tracking
-- **admin** (9 tools) - Users, files, templates, health configs, security
+- **user_management** (3 tools) - User accounts, security settings
+- **configuration** (4 tools) - Device templates, health monitoring configs
+- **files** (2 tools) - File listing and retrieval
 - **events** (2 tools) - Audit trail and event history
 
 ### Usage Pattern
 
 1. Connect to server - only 13 core tools visible
-2. Call `discover_tool_categories` to see available categories
-3. Call `enable_tool_category` with category name (e.g., `"reports"`)
+2. Call `list_tool_categories` to see available categories
+3. Call `load_tool_category` with category name (e.g., `"configuration"`)
 4. All tools in that category become available
 5. Repeat as needed for other categories
 
@@ -261,22 +262,22 @@ docker run -d \
 
 ## Usage Examples
 
-### Discover Available Tool Categories
+### List Available Tool Categories
 
 ```json
 {
-  "tool": "discover_tool_categories",
+  "tool": "list_tool_categories",
   "arguments": {}
 }
 ```
 
-### Enable a Tool Category
+### Load a Tool Category
 
 ```json
 {
-  "tool": "enable_tool_category",
+  "tool": "load_tool_category",
   "arguments": {
-    "category": "reports"
+    "category": "configuration"
   }
 }
 ```
